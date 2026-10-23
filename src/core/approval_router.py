@@ -268,128 +268,309 @@ def resolve_matching_rule(
     rules_by_number: Dict[int, ApprovalRule] = {r.rule_number: r for r in rules}
     notes: List[str] = []
 
-    clean_doc = (request.doc_type or "").strip().lower()
+    raw_doc = (request.doc_type or "").strip()
+    if not raw_doc:
+        notes.append(
+            "Тип документа не указан. Применен стандартный маршрут визирования для общих приказов (Правило 5)."
+        )
+        fallback = rules_by_number.get(5) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[4])
+        return fallback, notes, False
+
+    clean_doc = raw_doc.lower()
+
     is_order = any(w in clean_doc for w in ("приказ", "order", "mod-order", "утв-01", "утв-02", "утв-03", "утв-04"))
     is_disp = any(w in clean_doc for w in ("распоряжен", "disp", "mod-disp", "утв-05", "утв-06", "утв-07"))
     is_letter = any(w in clean_doc for w in ("письм", "letter"))
 
-    # Case 1: Non-modular fallback if user explicitly specifies uses_module=False
+    # Handover of affairs, personnel, and property keywords
+    has_prop_keywords = any(code in clean_doc for code in ("mod-order-prop", "утв-03", "order_prop")) or any(
+        w in clean_doc
+        for w in (
+            "прием и передача",
+            "приеме и передаче",
+            "прием-передача",
+            "приеме-передаче",
+            "передаче дел",
+            "передача дел",
+            "дел и имущества",
+            "приеме дел",
+            "прием дел",
+            "личному составу",
+            "личный состав",
+            "по личному составу",
+            "кадровым изменениям",
+            "кадровые изменения",
+            "кадровых изменениях",
+            "назначении на должность",
+            "освобождении от должности",
+            "по кадрам",
+            "кадровый",
+            "кадровым",
+            "кадровых",
+        )
+    )
+
+    # =========================================================================
+    # CASE 1: Non-modular fallback if user explicitly specifies uses_module=False
+    # =========================================================================
     if not request.uses_module:
         notes.append(
             "Документ оформлен без применения утвержденного модульного шаблона (uses_module=False). "
             "Применен маршрут обязательного визирования для немодульных документов."
         )
 
-        # Check if external letter
+        # 1. External letters
         if is_letter or clean_doc in ("10", "11", "12", "13", "letter_authorities", "letter_international", "letter_regional", "letter_legal_entities"):
-            if any(w in clean_doc for w in ("орган", "государствен", "президент", "правительств", "дума", "совет федерации", "счетн", "10", "letter_authorities")):
+            if any(w in clean_doc for w in ("орган", "государствен", "президент", "правительств", "дума", "совет федерации", "сенатор", "депутат", "счетн", "минцифры", "минфин", "министерств", "ведомств", "федеральн", "служба", "агентство", "банк россии", "цб рф", "центробанк", "регулятор", "10", "letter_authorities")):
                 rule = rules_by_number.get(10) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[9])
+                notes.append("Обращение в орган государственной власти РФ: обязательно согласование с Департаментом внутреннего контроля (Правило 10).")
                 return rule, notes, False
-            if any(w in clean_doc for w in ("иностранн", "международн", "банк", "foreign", "11", "letter_international")):
+            # Foreign organizations & foreign banks (not Russian commercial banks)
+            is_foreign = any(w in clean_doc for w in ("иностранн", "зарубежн", "международн", "foreign", "11", "letter_international", "мвф", "ебрр", "нацбанк")) or (
+                "банк" in clean_doc and any(w in clean_doc for w in ("иностран", "зарубеж", "международ", "foreign"))
+            )
+            if is_foreign:
                 rule = rules_by_number.get(11) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[10])
+                notes.append("Международная корреспонденция: обязательно согласование с Департаментом международного сотрудничества (Правило 11).")
                 return rule, notes, False
-            if request.involves_regional or any(w in clean_doc for w in ("ро организац", "региональн", "13", "letter_regional")):
+            if request.involves_regional or any(w in clean_doc for w in ("ро организац", "региональн", "филиал", "территориальн", "13", "letter_regional")):
                 rule = rules_by_number.get(13) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[12])
-                notes.append("Включено визирование подразделением ДОУ Регионального отделения (РО Организации).")
+                notes.append("Внешнее письмо подготовлено с участием РО: включено визирование подразделением ДОУ Регионального отделения (Правило 13).")
                 return rule, notes, False
             rule = rules_by_number.get(12) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[11])
             return rule, notes, False
 
-        # Check if disposition
+        # 2. Dispositions
         if is_disp or clean_doc in ("6", "7", "8", "9", "disp_material_aid", "disp_project", "disp_workgroup", "disp_audit"):
-            if any(w in clean_doc for w in ("материальн", "матпомощ", "выплат", "6", "disp_material_aid")):
+            if any(w in clean_doc for w in ("материальн", "матпомощ", "выплат", "пособи", "6", "disp_material_aid")):
                 rule = rules_by_number.get(6) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[5])
                 return rule, notes, False
             # Other non-modular dispositions -> Rule 9
             rule = rules_by_number.get(9) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[8])
             return rule, notes, False
 
-        # Other non-modular orders or default internal document -> Rule 5
+        # 3. Orders and other internal documents -> Rule 5
         rule = rules_by_number.get(5) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[4])
         return rule, notes, False
 
-    # Case 2: Document with uses_module=True
-    # 2.1 Direct numeric rule number mapping
-    clean_num = clean_doc.replace("rule", "").replace("правило", "").strip()
-    if clean_num.isdigit():
-        num = int(clean_num)
-        if num == 2 and request.involves_infosec_access:
-            num = 3
-        elif num == 7 and request.involves_it:
-            num = 8
-        elif num == 12 and request.involves_regional:
-            num = 13
-        if num in rules_by_number:
-            target_rule = rules_by_number[num]
-            is_mod = target_rule.is_modular
-            return target_rule, notes, is_mod
+    # =========================================================================
+    # CASE 2: Document with uses_module=True
+    # =========================================================================
 
-    # 2.2 Template codes and explicit aliases
-    # Information systems order -> Rule 4
-    if any(code in clean_doc for code in ("mod-order-is", "утв-01", "order_is", "order_it", "информационн")):
+    # 2.0 Check template module codes directly (УТВ-01 .. УТВ-07, MOD-ORDER-*, MOD-DISP-*)
+    if any(code in clean_doc for code in ("mod-order-is", "утв-01")):
         rule = rules_by_number.get(4) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[3])
-        notes.append("Проект приказа по информационной системе: обязательно согласование с ДИТ и ДИБ.")
+        notes.append("Проект приказа по информационной системе: обязательно согласование с ДИТ и ДИБ (Правило 4).")
         return rule, notes, True
 
-    # Handover of affairs and property -> Rule 3 (if infosec) or Rule 2 (without infosec)
-    if any(code in clean_doc for code in ("mod-order-prop", "утв-03", "order_prop", "прием", "передач")):
+    if any(code in clean_doc for code in ("mod-order-dou", "утв-02")):
+        rule = rules_by_number.get(5) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[4])
+        return rule, notes, True
+
+    if any(code in clean_doc for code in ("mod-order-prop", "утв-03")):
         if request.involves_infosec_access:
             rule = rules_by_number.get(3) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[2])
-            notes.append("Прием-передача дел затрагивает права доступа к ИС: включено согласование с Департаментом ИБ.")
+            notes.append("Прием-передача дел затрагивает права доступа к ИС: включено согласование с Департаментом информационной безопасности (Правило 3).")
+        else:
+            rule = rules_by_number.get(2) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[1])
+        return rule, notes, True
+
+    if any(code in clean_doc for code in ("mod-order-lna", "утв-04")):
+        rule = rules_by_number.get(5) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[4])
+        return rule, notes, True
+
+    if any(code in clean_doc for code in ("mod-disp-audit", "утв-05")):
+        rule = rules_by_number.get(9) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[8])
+        return rule, notes, True
+
+    if any(code in clean_doc for code in ("mod-disp-project", "утв-06", "mod-disp-workgroup", "утв-07")):
+        if request.involves_it:
+            rule = rules_by_number.get(8) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[7])
+            notes.append("Временное объединение создается для реализации ИТ-проекта или решения вопросов ИС: включено согласование с Департаментом информационных технологий (Правило 8).")
+        else:
+            rule = rules_by_number.get(7) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[6])
+        return rule, notes, True
+
+    # 2.1 Check for direct numeric rule number pattern (e.g. "4", "правило 4", "rule 4", "№ 4", "п. 4")
+    if not any(prefix in clean_doc for prefix in ("утв", "mod-", "order-", "disp-", "letter-")):
+        match_num = re.fullmatch(r"\s*(?:rule|правил[оа]|пункт|п\.|№|номер)?\s*(\d{1,2})\s*", clean_doc)
+        if match_num:
+            num = int(match_num.group(1))
+            if 1 <= num <= 13:
+                # Conditional promotion based on request flags
+                if num == 2 and request.involves_infosec_access:
+                    num = 3
+                    notes.append("Прием-передача дел затрагивает права доступа к ИС: включено согласование с Департаментом информационной безопасности (Правило 3).")
+                elif num == 7 and request.involves_it:
+                    num = 8
+                    notes.append("Временное объединение создается для реализации ИТ-проекта или решения вопросов ИС: включено согласование с Департаментом информационных технологий (Правило 8).")
+                elif num == 12 and request.involves_regional:
+                    num = 13
+                    notes.append("Внешнее письмо подготовлено с участием РО: включено визирование подразделением ДОУ Регионального отделения (Правило 13).")
+
+                target_rule = rules_by_number.get(num) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[num - 1])
+                return target_rule, notes, target_rule.is_modular
+
+    # 2.2 Handover of affairs and property -> Rule 3 (if infosec) or Rule 2 (without infosec)
+    # Evaluated before general IS orders to prevent collision when handover involves IS access
+    if has_prop_keywords:
+        has_infosec = (
+            request.involves_infosec_access
+            or (
+                (
+                    "с доступом" in clean_doc
+                    or "доступ" in clean_doc
+                    or "правами" in clean_doc
+                    or "учетн" in clean_doc
+                    or "информационной безопасности" in clean_doc
+                    or bool(re.search(r"\bис\b", clean_doc))
+                    or "информационн" in clean_doc
+                )
+                and ("без доступа" not in clean_doc and "без изменения" not in clean_doc)
+            )
+        )
+        if has_infosec:
+            rule = rules_by_number.get(3) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[2])
+            notes.append("Прием-передача дел затрагивает права доступа к ИС: включено согласование с Департаментом информационной безопасности (Правило 3).")
             return rule, notes, True
         else:
             rule = rules_by_number.get(2) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[1])
             return rule, notes, True
 
-    # Weekend / working calendar order -> Rule 1
-    if any(code in clean_doc for code in ("order_weekend", "weekend", "выходн", "праздничн", "календар")):
+    # 2.2 Information systems order -> Rule 4
+    has_is_keywords = (
+        any(code in clean_doc for code in ("mod-order-is", "утв-01", "order_is", "order_it"))
+        or (
+            is_order
+            and (
+                "информационн" in clean_doc
+                or bool(re.search(r"\b(ис|ит|it|is)\b", clean_doc))
+                or any(
+                    w in clean_doc
+                    for w in (
+                        "ввод в эксплуатацию",
+                        "вывод из эксплуатации",
+                        "опытная эксплуатация",
+                        "опытную эксплуатацию",
+                        "ввод ис",
+                        "вводе ис",
+                        "вывод ис",
+                        "выводе ис",
+                        "эксплуатаци",
+                    )
+                )
+            )
+        )
+        or ("ввод" in clean_doc and (bool(re.search(r"\bис\b", clean_doc)) or "информационн" in clean_doc))
+    )
+    if has_is_keywords:
+        rule = rules_by_number.get(4) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[3])
+        notes.append("Проект приказа по информационной системе: обязательно согласование с ДИТ и ДИБ (Правило 4).")
+        return rule, notes, True
+
+    # 2.3 Weekend / working calendar order -> Rule 1
+    if any(code in clean_doc for code in ("order_weekend", "weekend", "выходн", "праздничн", "календар", "нерабочие дни")):
         rule = rules_by_number.get(1) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[0])
         return rule, notes, True
 
-    # Working groups & project committees -> Rule 8 (if IT) or Rule 7 (general)
-    if any(code in clean_doc for code in ("mod-disp-workgroup", "mod-disp-project", "утв-06", "утв-07", "disp_workgroup", "disp_project", "рабоч", "комитет")):
-        if request.involves_it:
+    # 2.4 Working groups & project committees -> Rule 8 (if IT) or Rule 7 (general)
+    has_wg_keywords = any(code in clean_doc for code in ("mod-disp-workgroup", "mod-disp-project", "утв-06", "утв-07", "disp_workgroup", "disp_project")) or any(
+        w in clean_doc for w in ("рабоч", "комитет", "комисси", "временных объединений")
+    )
+    if has_wg_keywords:
+        has_it = (
+            request.involves_it
+            or (
+                (
+                    "ит" in clean_doc
+                    or "it" in clean_doc
+                    or bool(re.search(r"\b(ит|it|ис|is)\b", clean_doc))
+                    or "информационн" in clean_doc
+                    or "цифровизац" in clean_doc
+                    or "программн" in clean_doc
+                )
+                and ("без ит" not in clean_doc and "без участия ит" not in clean_doc and "не связан" not in clean_doc)
+            )
+        )
+        if has_it:
             rule = rules_by_number.get(8) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[7])
-            notes.append("Временное объединение создается для реализации ИТ-проекта: включено согласование с ДИТ.")
+            notes.append("Временное объединение создается для реализации ИТ-проекта или решения вопросов ИС: включено согласование с Департаментом информационных технологий (Правило 8).")
             return rule, notes, True
         else:
             rule = rules_by_number.get(7) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[6])
             return rule, notes, True
 
-    # Material assistance disposition -> Rule 6
-    if any(code in clean_doc for code in ("disp_material_aid", "material_aid", "материальн", "матпомощ", "выплат")):
+    # 2.5 Material assistance disposition -> Rule 6
+    if any(code in clean_doc for code in ("disp_material_aid", "material_aid", "материальн", "матпомощ", "выплат", "пособи")):
         rule = rules_by_number.get(6) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[5])
         return rule, notes, False
 
-    # Internal audit disposition -> Rule 9
-    if any(code in clean_doc for code in ("mod-disp-audit", "утв-05", "disp_audit", "аудит")):
+    # 2.6 Internal audit disposition -> Rule 9 (template УТВ-05)
+    if any(code in clean_doc for code in ("mod-disp-audit", "утв-05", "disp_audit", "аудит", "проверк")):
         rule = rules_by_number.get(9) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[8])
         return rule, notes, True
 
-    # DOU appointment / LNA approved templates -> Rule 5 (modular templates УТВ-02, УТВ-04)
-    if any(code in clean_doc for code in ("mod-order-dou", "утв-02", "order_dou", "делопроизводств")):
+    # 2.7 DOU appointment / LNA approved templates -> Rule 5 (modular templates УТВ-02, УТВ-04)
+    if any(code in clean_doc for code in ("mod-order-dou", "утв-02", "order_dou", "делопроизводств", "назначении ответственных")) or (
+        is_order and bool(re.search(r"\bдоу\b", clean_doc))
+    ):
+        rule = rules_by_number.get(5) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[4])
+    if any(code in clean_doc for code in ("mod-order-lna", "утв-04", "order_lna", "локальн", "лна", "регламент", "положени", "инструкци")) or (
+        is_order and bool(re.search(r"\bлна\b", clean_doc))
+    ):
         rule = rules_by_number.get(5) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[4])
         return rule, notes, True
-    if any(code in clean_doc for code in ("mod-order-lna", "утв-04", "order_lna", "локальн", "лна")):
+    # 2.7.1 Business trip and other general orders -> Rule 5
+    if is_order and any(w in clean_doc for w in ("командиров", "командировании", "поездк", "прочие приказы", "прочий приказ")):
         rule = rules_by_number.get(5) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[4])
-        return rule, notes, True
+        return rule, notes, False
 
-    # External letters
+    # 2.8 External letters
     if is_letter or any(code in clean_doc for code in ("letter_authorities", "letter_international", "letter_regional", "letter_legal_entities")):
-        if any(w in clean_doc for w in ("орган", "государствен", "президент", "правительств", "дума", "совет федерации", "счетн", "letter_authorities")):
+        if any(
+            w in clean_doc
+            for w in (
+                "орган",
+                "государствен",
+                "президент",
+                "правительств",
+                "дума",
+                "совет федерации",
+                "сенатор",
+                "депутат",
+                "счетн",
+                "минцифры",
+                "минфин",
+                "министерств",
+                "ведомств",
+                "федеральн",
+                "служба",
+                "агентство",
+                "банк россии",
+                "цб рф",
+                "центробанк",
+                "регулятор",
+                "letter_authorities",
+            )
+        ):
             rule = rules_by_number.get(10) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[9])
+            notes.append("Обращение в орган государственной власти РФ: обязательно согласование с Департаментом внутреннего контроля (Правило 10).")
             return rule, notes, False
-        if any(w in clean_doc for w in ("иностранн", "международн", "банк", "foreign", "letter_international")):
+        is_foreign = any(w in clean_doc for w in ("иностранн", "зарубежн", "международн", "foreign", "letter_international", "мвф", "ебрр", "нацбанк")) or (
+            "банк" in clean_doc and any(w in clean_doc for w in ("иностран", "зарубеж", "международ", "foreign"))
+        )
+        if is_foreign:
             rule = rules_by_number.get(11) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[10])
+            notes.append("Международная корреспонденция: обязательно согласование с Департаментом международного сотрудничества (Правило 11).")
             return rule, notes, False
-        if request.involves_regional or any(w in clean_doc for w in ("ро организац", "региональн", "letter_regional")):
+        if request.involves_regional or any(w in clean_doc for w in ("ро организац", "региональн", "филиал", "территориальн", "letter_regional")):
             rule = rules_by_number.get(13) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[12])
-            notes.append("Включено визирование подразделением ДОУ Регионального отделения (РО Организации).")
+            notes.append("Внешнее письмо подготовлено с участием РО: включено визирование подразделением ДОУ Регионального отделения (Правило 13).")
             return rule, notes, False
         rule = rules_by_number.get(12) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[11])
         return rule, notes, False
 
-    # 2.3 General fuzzy matching against all rules
+    # 2.9 General fuzzy matching against all rules with domain boosts
     best_rule: Optional[ApprovalRule] = None
     best_score = 0.0
 
@@ -397,19 +578,48 @@ def resolve_matching_rule(
         rule_name = rule.doc_type_name.lower()
         score = float(fuzz.token_set_ratio(clean_doc, rule_name))
 
-        if is_order and (rule_name.startswith("приказ") or "прочие приказы" in rule_name):
-            score += 20.0
-        elif is_disp and (rule_name.startswith("распоряжен") or "прочие распоряжения" in rule_name):
-            score += 20.0
-        elif is_letter and rule_name.startswith("письм"):
-            score += 20.0
+        if is_order:
+            if rule_name.startswith("приказ") or "прочие приказы" in rule_name:
+                score += 20.0
+            else:
+                score -= 30.0
+        elif is_disp:
+            if rule_name.startswith("распоряжен") or "прочие распоряжения" in rule_name:
+                score += 20.0
+            else:
+                score -= 30.0
+        elif is_letter:
+            if rule_name.startswith("письм"):
+                score += 20.0
+            else:
+                score -= 30.0
+
+        if ("информационн" in clean_doc or bool(re.search(r"\b(ис|ит)\b", clean_doc))) and ("информационн" in rule_name or rule.requires_it != "no"):
+            score += 25.0
+
+        if any(w in clean_doc for w in ("личн", "кадр", "персонал", "должност")) and rule.rule_number in (2, 3):
+            score += 35.0
+
+        if rule.rule_number == 1 and not any(w in clean_doc for w in ("выходн", "праздничн", "календар", "нерабоч", "weekend")):
+            score -= 35.0
+
+        if rule.rule_number == 6 and not any(w in clean_doc for w in ("материальн", "матпомощ", "выплат", "пособи")):
+            score -= 35.0
+
+        if rule.rule_number in (7, 8) and not any(w in clean_doc for w in ("групп", "комитет", "комисси", "объединен", "workgroup", "project")):
+            score -= 35.0
+
+        if rule.rule_number == 10 and not any(w in clean_doc for w in ("орган", "государствен", "президент", "правительств", "дума", "совет федерации", "сенатор", "депутат", "счетн", "минцифры", "минфин", "министерств", "ведомств", "федеральн", "служба", "агентство", "банк россии", "цб", "центробанк", "регулятор")):
+            score -= 35.0
+
+        if rule.rule_number == 11 and not any(w in clean_doc for w in ("иностран", "зарубеж", "международ", "foreign", "мвф", "ебрр")):
+            score -= 35.0
 
         if score > best_score:
             best_score = score
             best_rule = rule
 
     if best_rule:
-        # Conditional promotion
         rule_num = best_rule.rule_number
         if rule_num == 2 and request.involves_infosec_access:
             rule_num = 3
@@ -711,3 +921,124 @@ def build_pipeline_approval_recommendation(
         stages=stages,
         signatory=rule.signatory,
     )
+
+
+APPROVAL_QUERY_TRIGGERS = (
+    "согласов",
+    "визир",
+    "виз",
+    "маршрут",
+    "матриц",
+    "подпис",
+    "кто подписывает",
+    "кем подписывается",
+    "с кем",
+    "кто визирует",
+    "кто согласует",
+    "кто согласовывает",
+    "порядок визирования",
+    "порядок согласования",
+    "правила визирования",
+    "этапы визирования",
+    "регламент визирования",
+    "регламент согласования",
+)
+
+
+def match_approval_from_query(
+    rules: List[ApprovalRule],
+    query: str,
+) -> Optional[ApprovalRecommendation]:
+    """Identify if a natural language query relates to document approval and return matching recommendation."""
+    if not query or not query.strip():
+        return None
+
+    clean_q = query.strip().lower()
+
+    has_approval_intent = any(trigger in clean_q for trigger in APPROVAL_QUERY_TRIGGERS)
+
+    # Check if query matches a rule number or template module code directly
+    has_direct_code = (
+        any(
+            c in clean_q
+            for c in (
+                "утв-01",
+                "утв-02",
+                "утв-03",
+                "утв-04",
+                "утв-05",
+                "утв-06",
+                "утв-07",
+                "mod-order",
+                "mod-disp",
+            )
+        )
+        or bool(re.search(r"\b(правило|rule)\s*\d{1,2}\b", clean_q))
+    )
+
+    if not has_approval_intent and not has_direct_code:
+        return None
+
+    # Condition flags detection from query text
+    infosec_access = (
+        (
+            "с доступом" in clean_q
+            or "доступ" in clean_q
+            or "правами" in clean_q
+            or "учетн" in clean_q
+            or "информационной безопасности" in clean_q
+            or bool(re.search(r"\bис\b", clean_q))
+            or "информационн" in clean_q
+        )
+        and ("без доступа" not in clean_q and "без изменения" not in clean_q)
+    )
+
+    involves_it = (
+        (
+            bool(re.search(r"\b(ит|it|ис|is)\b", clean_q))
+            or "информационн" in clean_q
+            or "цифровизац" in clean_q
+            or "программн" in clean_q
+        )
+        and (
+            "без ит" not in clean_q
+            and "без участия ит" not in clean_q
+            and "не связан" not in clean_q
+        )
+    )
+
+    involves_regional = any(
+        w in clean_q
+        for w in (
+            "региональн",
+            "ро организац",
+            "руководство ро",
+            "филиал",
+            "территориальн",
+        )
+    )
+
+    uses_module = not any(
+        w in clean_q
+        for w in ("без модуля", "без применения модуля", "немодульн")
+    )
+
+    req = ApprovalCalculateRequest(
+        doc_type=clean_q,
+        uses_module=uses_module,
+        involves_infosec_access=infosec_access,
+        involves_it=involves_it,
+        involves_regional=involves_regional,
+        initiator_department="Подразделение-инициатор",
+    )
+
+    matched_rule, notes, is_mod = resolve_matching_rule(rules, req)
+    stages = construct_approval_stages(matched_rule, req)
+
+    return ApprovalRecommendation(
+        rule_number=matched_rule.rule_number,
+        doc_type_name=matched_rule.doc_type_name,
+        stages=stages,
+        signatory=matched_rule.signatory,
+    )
+

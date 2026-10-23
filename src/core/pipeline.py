@@ -95,91 +95,13 @@ async def match_approval_recommendation(
     if not query or not query.strip():
         return None
 
-    clean_query = query.strip().lower()
+    from src.core.approval_router import (
+        get_all_rules_from_db,
+        match_approval_from_query,
+    )
 
-    # Check for approval intent
-    has_approval_intent = any(kw in clean_query for kw in APPROVAL_TRIGGER_KEYWORDS)
-
-    # Document kind flags
-    is_prikaz = any(w in clean_query for w in ("приказ", "приказа", "приказом", "приказов"))
-    is_disp = any(w in clean_query for w in ("распоряжен", "распоряжение", "распоряжения", "распоряжением"))
-    is_letter = any(w in clean_query for w in ("письм", "письмо", "письма", "письмом"))
-
-    # Fetch all registered approval rules
-    stmt = select(ApprovalRule).order_by(ApprovalRule.rule_number)
-    res = await session.execute(stmt)
-    rules = res.scalars().all()
-    if not rules:
-        return None
-
-    best_rule: Optional[ApprovalRule] = None
-    best_score = 0.0
-
-    for rule in rules:
-        rule_name = rule.doc_type_name.lower()
-        score = fuzz.token_set_ratio(clean_query, rule_name)
-
-        # Document kind alignment to prevent cross-type mismatch (e.g. order matching disposition)
-        if is_prikaz:
-            if rule_name.startswith("приказ") or "прочие приказы" in rule_name:
-                score += 20.0
-            else:
-                score -= 30.0
-        elif is_disp:
-            if rule_name.startswith("распоряжен") or "прочие распоряжения" in rule_name:
-                score += 20.0
-            else:
-                score -= 30.0
-        elif is_letter:
-            if rule_name.startswith("письм"):
-                score += 20.0
-            else:
-                score -= 30.0
-
-        # Domain keyword bonuses with strict operator precedence
-        if "информационн" in clean_query and ("информационн" in rule_name or rule.requires_it != "no"):
-            score += 25.0
-        if "кадр" in clean_query or "личн" in clean_query:
-            if rule.rule_number in (2, 3):
-                score += 35.0
-            elif rule.requires_hr:
-                score += 15.0
-        if any(w in clean_query for w in ("выходн", "праздничн", "календар")) and rule.rule_number == 1:
-            score += 40.0
-        if any(w in clean_query for w in ("командиров", "командирован")) and rule.rule_number == 5:
-            score += 40.0
-        if "основной деятельност" in clean_query and rule.rule_number == 5:
-            score += 40.0
-        if "отпуск" in clean_query and (rule.rule_number in (1, 5) or rule.requires_hr):
-            score += 30.0
-        if "имущество" in clean_query and "имущество" in rule_name:
-            score += 40.0
-        if "аудит" in clean_query and "аудит" in rule_name:
-            score += 40.0
-        if "рабоч" in clean_query and "групп" in clean_query and "рабочих групп" in rule_name:
-            score += 40.0
-        if any(org in clean_query for org in ("счетн", "счетная палата", "государственн", "президент", "правительств", "дума", "совет федерации")) and rule.rule_number == 10:
-            score += 50.0
-        if any(org in clean_query for org in ("иностранн", "международн", "банк")) and rule.rule_number == 11:
-            score += 50.0
-        if any(org in clean_query for org in ("региональн", "ро организац")) and rule.rule_number == 13:
-            score += 40.0
-
-        if score > best_score:
-            best_score = score
-            best_rule = rule
-
-    # If approval intent explicitly present and best_score >= 35.0, or high similarity >= 65.0
-    if (has_approval_intent and best_score >= 35.0 and best_rule) or (best_score >= 65.0 and best_rule):
-        stages = build_approval_stages(best_rule)
-        return ApprovalRecommendation(
-            rule_number=best_rule.rule_number,
-            doc_type_name=best_rule.doc_type_name,
-            stages=stages,
-            signatory=best_rule.signatory,
-        )
-
-    return None
+    rules = await get_all_rules_from_db(session)
+    return match_approval_from_query(rules, query)
 
 
 async def log_audit_event(

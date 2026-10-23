@@ -40,6 +40,9 @@ from src.schemas.api_models import (
 class TestApprovalRouter(unittest.IsolatedAsyncioTestCase):
     """Authoritative test suite for the Approval Router decision engine and API."""
 
+    async def asyncTearDown(self):
+        await engine.dispose()
+
     @classmethod
     async def asyncTearDownClass(cls):
         await engine.dispose()
@@ -284,73 +287,201 @@ class TestApprovalRouter(unittest.IsolatedAsyncioTestCase):
     async def test_pipeline_integration_natural_language_queries(self):
         """Verify natural language queries attach correct approval recommendations in pipeline."""
         async with async_session_factory() as session:
-            # 1. IS order natural language query
+            # 1. Exact prompt query: IS order with short acronym "ИС" -> Rule 4
             rec_is = await match_approval_recommendation(
-                session, "С кем согласовать приказ о вводе в эксплуатацию информационной системы?"
+                session, "С кем согласовать приказ о вводе ИС?"
             )
             self.assertIsNotNone(rec_is)
             self.assertEqual(rec_is.rule_number, 4)
-            self.assertGreaterEqual(len(rec_is.stages), 7)
-            dept_names = [s.department for s in rec_is.stages]
-            self.assertTrue(any("информационных технологий" in d.lower() for d in dept_names))
-            self.assertTrue(any("информационной безопасности" in d.lower() for d in dept_names))
+            dept_names_is = [s.department for s in rec_is.stages]
+            self.assertTrue(any("информационных технологий" in d.lower() for d in dept_names_is))
+            self.assertTrue(any("информационной безопасности" in d.lower() for d in dept_names_is))
+            self.assertFalse(any("кадр" in d.lower() for d in dept_names_is))
 
-            # 2. Working group query
+            # 2. Exact prompt query: Working group general -> Rule 7
             rec_wg = await match_approval_recommendation(
                 session, "Какой маршрут согласования для распоряжения о рабочей группе?"
             )
             self.assertIsNotNone(rec_wg)
             self.assertEqual(rec_wg.rule_number, 7)
-            self.assertTrue(any("Кадровое" in s.department for s in rec_wg.stages))
+            dept_names_wg = [s.department for s in rec_wg.stages]
+            self.assertTrue(any("кадр" in d.lower() for d in dept_names_wg))
+            self.assertFalse(any("информационных технологий" in d.lower() for d in dept_names_wg))
 
-    def test_fastapi_rest_endpoints(self):
-        """Verify FastAPI REST API endpoints /v1/approval/rules and /v1/approval/calculate."""
-        client = TestClient(app)
+            # 3. Working group with IT condition -> Rule 8
+            rec_wg_it = await match_approval_recommendation(
+                session, "Маршрут согласования распоряжения о создании рабочей группы по вопросам ИТ"
+            )
+            self.assertIsNotNone(rec_wg_it)
+            self.assertEqual(rec_wg_it.rule_number, 8)
+            dept_names_wg_it = [s.department for s in rec_wg_it.stages]
+            self.assertTrue(any("информационных технологий" in d.lower() for d in dept_names_wg_it))
 
-        # 1. GET /v1/approval/rules
-        resp_rules = client.get("/v1/approval/rules")
-        self.assertEqual(resp_rules.status_code, 200)
-        rules_data = resp_rules.json()
-        self.assertEqual(len(rules_data), 13)
-        self.assertEqual([r["rule_number"] for r in rules_data], list(range(1, 14)))
+            # 4. Affairs handover WITH IS access -> Rule 3
+            rec_prop_sec = await match_approval_recommendation(
+                session, "С кем согласовать приказ о приеме и передаче дел с доступом к ИС?"
+            )
+            self.assertIsNotNone(rec_prop_sec)
+            self.assertEqual(rec_prop_sec.rule_number, 3)
+            dept_names_prop_sec = [s.department for s in rec_prop_sec.stages]
+            self.assertTrue(any("информационной безопасности" in d.lower() for d in dept_names_prop_sec))
 
-        # Rule 4 check
-        r4 = next(r for r in rules_data if r["rule_number"] == 4)
-        self.assertTrue(r4["is_modular"])
-        self.assertEqual(r4["requires_infosec"], "yes")
-        self.assertEqual(r4["requires_it"], "yes")
+            # 5. Affairs handover WITHOUT IS access -> Rule 2
+            rec_prop_no_sec = await match_approval_recommendation(
+                session, "С кем согласовать приказ о приеме-передаче дел без доступа к ИС?"
+            )
+            self.assertIsNotNone(rec_prop_no_sec)
+            self.assertEqual(rec_prop_no_sec.rule_number, 2)
+            dept_names_prop_no_sec = [s.department for s in rec_prop_no_sec.stages]
+            self.assertFalse(any("информационной безопасности" in d.lower() for d in dept_names_prop_no_sec))
 
-        # 2. POST /v1/approval/calculate (Order with IT systems)
-        resp_calc = client.post(
-            "/v1/approval/calculate",
-            json={
-                "doc_type": "MOD-ORDER-IS",
-                "uses_module": True,
-                "involves_infosec_access": True,
-                "involves_it": True,
-                "involves_regional": False,
-                "initiator_department": "Департамент ИТ",
-            },
-        )
-        self.assertEqual(resp_calc.status_code, 200)
-        calc_data = resp_calc.json()
-        self.assertEqual(calc_data["rule_number"], 4)
-        self.assertTrue(calc_data["is_modular"])
-        self.assertGreaterEqual(len(calc_data["stages"]), 7)
+            # 6. Letter to State Authority / Ministry (Минцифры) -> Rule 10
+            rec_min = await match_approval_recommendation(
+                session, "С кем согласовать внешнее письмо в Минцифры?"
+            )
+            self.assertIsNotNone(rec_min)
+            self.assertEqual(rec_min.rule_number, 10)
+            dept_names_min = [s.department for s in rec_min.stages]
+            self.assertTrue(any("внутреннего контроля" in d.lower() for d in dept_names_min))
 
-        # 3. POST /v1/approval/calculate (Non-modular fallback)
-        resp_fallback = client.post(
-            "/v1/approval/calculate",
-            json={
-                "doc_type": "MOD-ORDER-IS",
-                "uses_module": False,
-            },
-        )
-        self.assertEqual(resp_fallback.status_code, 200)
-        fb_data = resp_fallback.json()
-        self.assertEqual(fb_data["rule_number"], 5)
-        self.assertFalse(fb_data["is_modular"])
+            # 7. Letter to Central Bank of Russia (Банк России) -> Rule 10
+            rec_cbr = await match_approval_recommendation(
+                session, "С кем согласовать внешнее письмо в Банк России?"
+            )
+            self.assertIsNotNone(rec_cbr)
+            self.assertEqual(rec_cbr.rule_number, 10)
+
+            # 8. Letter to Russian commercial bank (Сбербанк) -> Rule 12 (NOT foreign!)
+            rec_sber = await match_approval_recommendation(
+                session, "С кем согласовать внешнее письмо в Сбербанк?"
+            )
+            self.assertIsNotNone(rec_sber)
+            self.assertEqual(rec_sber.rule_number, 12)
+            dept_names_sber = [s.department for s in rec_sber.stages]
+            self.assertFalse(any("международного сотрудничества" in d.lower() for d in dept_names_sber))
+
+            # 9. Letter to foreign bank -> Rule 11
+            rec_foreign = await match_approval_recommendation(
+                session, "С кем согласовать письмо в иностранный банк?"
+            )
+            self.assertIsNotNone(rec_foreign)
+            self.assertEqual(rec_foreign.rule_number, 11)
+            dept_names_foreign = [s.department for s in rec_foreign.stages]
+            self.assertTrue(any("международного сотрудничества" in d.lower() for d in dept_names_foreign))
+
+            # 10. Regional letter -> Rule 13
+            rec_reg = await match_approval_recommendation(
+                session, "С кем согласовать внешнее письмо регионального отделения?"
+            )
+            self.assertIsNotNone(rec_reg)
+            self.assertEqual(rec_reg.rule_number, 13)
+
+            # 11. Informational query without approval intent -> None
+            rec_info = await match_approval_recommendation(
+                session, "Что такое номенклатура дел?"
+            )
+            self.assertIsNone(rec_info)
+
+    async def test_direct_rule_numbers_and_edge_inputs(self):
+        """Verify numeric rule resolution, template aliases, and empty input handling."""
+        async with async_session_factory() as session:
+            # Numeric rule 4
+            resp_r4 = await calculate_approval_route(
+                session, ApprovalCalculateRequest(doc_type="правило 4")
+            )
+            self.assertEqual(resp_r4.rule_number, 4)
+            self.assertTrue(resp_r4.is_modular)
+
+            # Numeric rule 2 promoted to 3 with infosec flag
+            resp_r2_to_3 = await calculate_approval_route(
+                session, ApprovalCalculateRequest(doc_type="2", involves_infosec_access=True)
+            )
+            self.assertEqual(resp_r2_to_3.rule_number, 3)
+
+            # Numeric rule 7 promoted to 8 with IT flag
+            resp_r7_to_8 = await calculate_approval_route(
+                session, ApprovalCalculateRequest(doc_type="№ 7", involves_it=True)
+            )
+            self.assertEqual(resp_r7_to_8.rule_number, 8)
+
+            # Template alias УТВ-01
+            resp_utv1 = await calculate_approval_route(
+                session, ApprovalCalculateRequest(doc_type="УТВ-01")
+            )
+            self.assertEqual(resp_utv1.rule_number, 4)
+            self.assertTrue(resp_utv1.is_modular)
+
+            # Template alias УТВ-02 (DOU appointment)
+            resp_utv2 = await calculate_approval_route(
+                session, ApprovalCalculateRequest(doc_type="УТВ-02")
+            )
+            self.assertEqual(resp_utv2.rule_number, 5)
+            self.assertTrue(resp_utv2.is_modular)
+
+            # Template alias УТВ-05 (Internal audit)
+            resp_utv5 = await calculate_approval_route(
+                session, ApprovalCalculateRequest(doc_type="УТВ-05")
+            )
+            self.assertEqual(resp_utv5.rule_number, 9)
+            self.assertTrue(resp_utv5.is_modular)
+
+            # Empty doc_type string fallback
+            resp_empty = await calculate_approval_route(
+                session, ApprovalCalculateRequest(doc_type="   ")
+            )
+            self.assertEqual(resp_empty.rule_number, 5)
+            self.assertFalse(resp_empty.is_modular)
+
+    async def test_fastapi_rest_endpoints(self):
+        """Verify FastAPI REST API endpoints /v1/approval/rules and /v1/approval/calculate cleanly using AsyncClient."""
+        from httpx import ASGITransport, AsyncClient
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            # 1. GET /v1/approval/rules
+            resp_rules = await client.get("/v1/approval/rules")
+            self.assertEqual(resp_rules.status_code, 200)
+            rules_data = resp_rules.json()
+            self.assertEqual(len(rules_data), 13)
+            self.assertEqual([r["rule_number"] for r in rules_data], list(range(1, 14)))
+
+            # Rule 4 check
+            r4 = next(r for r in rules_data if r["rule_number"] == 4)
+            self.assertTrue(r4["is_modular"])
+            self.assertEqual(r4["requires_infosec"], "yes")
+            self.assertEqual(r4["requires_it"], "yes")
+
+            # 2. POST /v1/approval/calculate (Order with IT systems)
+            resp_calc = await client.post(
+                "/v1/approval/calculate",
+                json={
+                    "doc_type": "MOD-ORDER-IS",
+                    "uses_module": True,
+                    "involves_infosec_access": True,
+                    "involves_it": True,
+                    "involves_regional": False,
+                    "initiator_department": "Департамент ИТ",
+                },
+            )
+            self.assertEqual(resp_calc.status_code, 200)
+            calc_data = resp_calc.json()
+            self.assertEqual(calc_data["rule_number"], 4)
+            self.assertTrue(calc_data["is_modular"])
+            self.assertGreaterEqual(len(calc_data["stages"]), 7)
+
+            # 3. POST /v1/approval/calculate (Non-modular fallback)
+            resp_fallback = await client.post(
+                "/v1/approval/calculate",
+                json={
+                    "doc_type": "MOD-ORDER-IS",
+                    "uses_module": False,
+                },
+            )
+            self.assertEqual(resp_fallback.status_code, 200)
+            fb_data = resp_fallback.json()
+            self.assertEqual(fb_data["rule_number"], 5)
+            self.assertFalse(fb_data["is_modular"])
 
 
 if __name__ == "__main__":
     unittest.main()
+

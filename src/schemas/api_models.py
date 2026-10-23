@@ -92,6 +92,24 @@ class ApprovalCalculateResponse(BaseModel):
     notes: List[str] = []
 
 
+class ApprovalRuleItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: Optional[str] = None
+    rule_number: int
+    category: str
+    doc_type_name: str
+    is_modular: bool
+    requires_legal: bool
+    requires_dou: bool
+    requires_hr: bool
+    requires_infosec: str
+    requires_it: str
+    requires_regional: str
+    condition_description: Optional[str] = None
+    signatory: str
+    extra_info: Dict[str, Any] = Field(default_factory=dict)
+
+
 class TemplateModuleInfo(BaseModel):
     model_config = ConfigDict(extra="forbid")
     module_code: str

@@ -69,108 +69,23 @@ APPROVAL_TRIGGER_KEYWORDS = [
 ]
 
 
-def build_approval_stages(rule: ApprovalRule) -> List[ApprovalStage]:
-    """Convert an ApprovalRule database model into structured ApprovalStage list."""
-    stages: List[ApprovalStage] = []
-    order = 1
+def build_approval_stages(
+    rule: ApprovalRule,
+    initiator_department: Optional[str] = None,
+) -> List[ApprovalStage]:
+    """Convert an ApprovalRule database model into structured 5-stage ApprovalStage list per Section 4.2."""
+    from src.core.approval_router import construct_approval_stages
+    from src.schemas.api_models import ApprovalCalculateRequest
 
-    # 1. Legal expertise
-    if rule.requires_legal:
-        stages.append(
-            ApprovalStage(
-                order=order,
-                role_name="Юрист-эксперт",
-                department="Юридическое подразделение",
-                reason="Правовая экспертиза проекта документа и проверка соответствия законодательству РФ",
-                is_mandatory=True,
-            )
-        )
-        order += 1
-
-    # 2. DOU linguistic & regulatory expertise
-    if rule.requires_dou:
-        stages.append(
-            ApprovalStage(
-                order=order,
-                role_name="Специалист ДОУ",
-                department="Департамент делопроизводства (ДОУ)",
-                reason="Лингвистическая экспертиза, проверка реквизитов и соответствия стандартам ДОУ",
-                is_mandatory=True,
-            )
-        )
-        order += 1
-
-    # 3. HR department
-    if rule.requires_hr:
-        stages.append(
-            ApprovalStage(
-                order=order,
-                role_name="Специалист по кадрам",
-                department="Кадровое подразделение",
-                reason="Согласование кадровых вопросов, штатного расписания и условий труда",
-                is_mandatory=True,
-            )
-        )
-        order += 1
-
-    # 4. InfoSec department
-    if rule.requires_infosec != "no":
-        is_mand = rule.requires_infosec == "yes"
-        reason = (
-            "Обязательное согласование требований информационной безопасности"
-            if is_mand
-            else f"Согласование требований информационной безопасности ({rule.requires_infosec})"
-        )
-        stages.append(
-            ApprovalStage(
-                order=order,
-                role_name="Офицер безопасности",
-                department="Подразделение информационной безопасности",
-                reason=reason,
-                is_mandatory=is_mand,
-            )
-        )
-        order += 1
-
-    # 5. IT department
-    if rule.requires_it != "no":
-        is_mand = rule.requires_it == "yes"
-        reason = (
-            "Обязательное согласование технических решений и архитектуры ИС"
-            if is_mand
-            else f"Согласование технических требований и совместимости ({rule.requires_it})"
-        )
-        stages.append(
-            ApprovalStage(
-                order=order,
-                role_name="ИТ-архитектор / Эксперт",
-                department="Департамент информационных технологий",
-                reason=reason,
-                is_mandatory=is_mand,
-            )
-        )
-        order += 1
-
-    # 6. Regional branches
-    if rule.requires_regional != "no":
-        is_mand = rule.requires_regional == "yes"
-        reason = (
-            "Обязательное согласование с региональными отделениями Организации"
-            if is_mand
-            else f"Согласование регионального контура ({rule.requires_regional})"
-        )
-        stages.append(
-            ApprovalStage(
-                order=order,
-                role_name="Руководитель ТУ / РО",
-                department="Территориальные учреждения / Региональные отделения",
-                reason=reason,
-                is_mandatory=is_mand,
-            )
-        )
-        order += 1
-
-    return stages
+    req = ApprovalCalculateRequest(
+        doc_type=rule.doc_type_name,
+        uses_module=rule.is_modular,
+        involves_infosec_access=(rule.requires_infosec == "yes"),
+        involves_it=(rule.requires_it == "yes"),
+        involves_regional=(rule.requires_regional == "yes"),
+        initiator_department=initiator_department or "Подразделение-инициатор",
+    )
+    return construct_approval_stages(rule, req)
 
 
 async def match_approval_recommendation(

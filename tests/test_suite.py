@@ -18,6 +18,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
         pass
 
 # Import the authoritative test cases
+from tests.test_approval_router import TestApprovalRouter
 from tests.test_extractor import TestExtractorUnit
 from tests.test_indexer_integration import TestIndexerIntegration
 from tests.test_pipeline import TestPipeline
@@ -32,6 +33,7 @@ def suite() -> unittest.TestSuite:
     s.addTests(loader.loadTestsFromTestCase(TestIndexerIntegration))
     s.addTests(loader.loadTestsFromTestCase(TestRetriever))
     s.addTests(loader.loadTestsFromTestCase(TestPipeline))
+    s.addTests(loader.loadTestsFromTestCase(TestApprovalRouter))
     return s
 
 

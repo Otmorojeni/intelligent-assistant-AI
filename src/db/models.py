@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from sqlalchemy import (
     String,
@@ -14,6 +14,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB, TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+def utc_now() -> datetime:
+    """Return timezone-aware current UTC datetime."""
+    return datetime.now(timezone.utc)
 
 
 class Base(DeclarativeBase):
@@ -34,8 +39,8 @@ class KnowledgeDocument(Base):
     file_name: Mapped[str] = mapped_column(String(256))
     file_size: Mapped[int] = mapped_column(Integer, default=0)
     sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
     chunks: Mapped[List["DocumentChunk"]] = relationship(
         "DocumentChunk", back_populates="document", cascade="all, delete-orphan"
@@ -141,7 +146,7 @@ class ProjectCard(Base):
     approval_route: Mapped[list] = mapped_column(JSONB, default=list)
     generated_file_name: Mapped[str] = mapped_column(String(256))
     status: Mapped[str] = mapped_column(String(32), default="draft")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     template: Mapped["TemplateModule"] = relationship("TemplateModule", back_populates="projects")
 
@@ -151,7 +156,7 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)
     user_role: Mapped[str] = mapped_column(String(64), index=True)  # employee, dou_specialist, security_auditor
     user_name: Mapped[str] = mapped_column(String(128), default="Пользователь")
     action_type: Mapped[str] = mapped_column(String(64), index=True)  # query, generate_doc, upload_version, access_denied

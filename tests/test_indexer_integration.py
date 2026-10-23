@@ -1,16 +1,18 @@
 """Integration tests for database indexing, seeding, fulltext search, and foreign keys."""
 
 import asyncio
+from pathlib import Path
 import sys
-import pytest
+import unittest
+
 from sqlalchemy import func, select
 
-from src.db.database import async_session_factory, init_db
 from src.core.indexer import (
     index_all_materials,
     lookup_defined_term,
     search_chunks_fulltext,
 )
+from src.db.database import async_session_factory, engine, init_db
 from src.db.models import (
     ApprovalRule,
     DefinedTerm,
@@ -20,83 +22,123 @@ from src.db.models import (
 )
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create event loop with SelectorEventLoop on Windows for asyncpg/psycopg compatibility."""
-    if sys.platform == "win32":
-        loop = asyncio.SelectorEventLoop()
-    else:
-        loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+class TestIndexerIntegration(unittest.IsolatedAsyncioTestCase):
+    """Integration tests connecting to live PostgreSQL container."""
 
+    @classmethod
+    async def asyncSetUpClass(cls):
+        await init_db()
+        async with async_session_factory() as session:
+            await index_all_materials(session, reset=True)
 
-@pytest.mark.asyncio
-async def test_full_database_seeding_and_counts():
-    """Verify complete indexing workflow creates all expected records."""
-    await init_db()
-    async with async_session_factory() as session:
-        stats = await index_all_materials(session, reset=True)
+    @classmethod
+    async def asyncTearDownClass(cls):
+        await engine.dispose()
 
-        assert stats["documents_count"] == 10
-        assert stats["chunks_count"] == 302
-        assert stats["terms_count"] == 29
-        assert stats["approval_rules_count"] == 13
-        assert stats["template_modules_count"] == 7
+    async def test_full_database_seeding_and_counts(self):
+        """Verify complete indexing workflow creates all expected records."""
+        async with async_session_factory() as session:
+            stats = await index_all_materials(session, reset=True)
 
+            self.assertEqual(stats["documents_count"], 10)
+            self.assertEqual(stats["chunks_count"], 299)
+            self.assertEqual(stats["terms_count"], 30)
+            self.assertEqual(stats["approval_rules_count"], 13)
+            self.assertEqual(stats["template_modules_count"], 7)
 
-@pytest.mark.asyncio
-async def test_tsvector_fulltext_search():
-    """Verify PostgreSQL tsvector full-text search against Russian documents."""
-    async with async_session_factory() as session:
-        # Search for linguistic expertise
-        matches = await search_chunks_fulltext(session, "лингвистическая экспертиза", top_k=3)
-        assert len(matches) > 0
-        assert any("лингвистическая экспертиза" in m["content"].lower() for m in matches)
+    async def test_tsvector_fulltext_search(self):
+        """Verify PostgreSQL tsvector full-text search against Russian documents."""
+        async with async_session_factory() as session:
+            # 1. Search for linguistic expertise
+            matches = await search_chunks_fulltext(session, "лингвистическая экспертиза", top_k=3)
+            self.assertGreater(len(matches), 0)
+            self.assertTrue(any("лингвистическая экспертиза" in m["content"].lower() for m in matches))
 
-        # Search for IT information systems
-        matches_is = await search_chunks_fulltext(session, "ввод в эксплуатацию информационной системы", top_k=3)
-        assert len(matches_is) > 0
-        assert any("эксплуатаци" in m["content"].lower() for m in matches_is)
+            # 2. Search for IT information systems
+            matches_is = await search_chunks_fulltext(session, "ввод в эксплуатацию информационной системы", top_k=3)
+            self.assertGreater(len(matches_is), 0)
+            self.assertTrue(any("эксплуатаци" in m["content"].lower() for m in matches_is))
 
-        # Search for objection table
-        matches_table = await search_chunks_fulltext(session, "таблица замечаний", top_k=3)
-        assert len(matches_table) > 0
+            # 3. Search for objection table (Appendix 1)
+            matches_table = await search_chunks_fulltext(session, "таблица замечаний", top_k=3)
+            self.assertGreater(len(matches_table), 0)
 
+            # 4. Search by clause identifier directly ("10.6" and "п. 4.1.3")
+            matches_clause = await search_chunks_fulltext(session, "п. 4.1.3", top_k=3)
+            self.assertGreater(len(matches_clause), 0)
+            self.assertEqual(matches_clause[0]["clause"], "4.1.3")
 
-@pytest.mark.asyncio
-async def test_defined_terms_glossary():
-    """Verify glossary lookup for canonical abbreviations."""
-    async with async_session_factory() as session:
-        term_iis = await lookup_defined_term(session, "ИИС ДО")
-        assert term_iis is not None
-        assert "Интегрированная" in term_iis["expansion"]
+            # 5. Search by template code and reg_number
+            matches_tmpl = await search_chunks_fulltext(session, "УТВ-01", top_k=3)
+            self.assertGreater(len(matches_tmpl), 0)
+            self.assertEqual(matches_tmpl[0]["doc_code"], "MOD-ORDER-IS")
 
-        term_lna = await lookup_defined_term(session, "лна")
-        assert term_lna is not None
-        assert "Локальный" in term_lna["expansion"]
+            # 6. Empty search query
+            empty_matches = await search_chunks_fulltext(session, "   ")
+            self.assertEqual(len(empty_matches), 0)
 
-        term_dsp = await lookup_defined_term(session, "ДСП")
-        assert term_dsp is not None
-        assert "служебного" in term_dsp["expansion"]
+    async def test_defined_terms_glossary(self):
+        """Verify glossary lookup for canonical abbreviations and expansions."""
+        async with async_session_factory() as session:
+            # Exact canonical
+            term_iis = await lookup_defined_term(session, "ИИС ДО")
+            self.assertIsNotNone(term_iis)
+            self.assertIn("Интегрированная", term_iis["expansion"])
 
-        # Non-existent term
-        term_unknown = await lookup_defined_term(session, "НЕИЗВЕСТНЫЙ_ТЕРМИН_XYZ")
-        assert term_unknown is None
+            # Lowercase canonical
+            term_lna = await lookup_defined_term(session, "лна")
+            self.assertIsNotNone(term_lna)
+            self.assertIn("Локальный", term_lna["expansion"])
 
+            # Dских
+            term_dsp = await lookup_defined_term(session, "ДСП")
+            self.assertIsNotNone(term_dsp)
+            self.assertIn("служебного", term_dsp["expansion"])
 
-@pytest.mark.asyncio
-async def test_template_module_foreign_keys():
-    """Verify that every TemplateModule is linked to a valid ApprovalRule."""
-    async with async_session_factory() as session:
-        res = await session.execute(select(TemplateModule))
-        templates = res.scalars().all()
-        assert len(templates) == 7
+            # SED
+            term_sed = await lookup_defined_term(session, "СЭД")
+            self.assertIsNotNone(term_sed)
+            self.assertIn("электронного", term_sed["expansion"])
 
-        for t in templates:
-            assert t.default_rule_id is not None
-            rule_res = await session.execute(
-                select(ApprovalRule).where(ApprovalRule.id == t.default_rule_id)
+            # Expansion query
+            term_by_exp = await lookup_defined_term(session, "Локальный нормативный акт")
+            self.assertIsNotNone(term_by_exp)
+            self.assertEqual(term_by_exp["canonical"], "ЛНА")
+
+            # Non-existent term
+            term_unknown = await lookup_defined_term(session, "НЕИЗВЕСТНЫЙ_ТЕРМИН_XYZ")
+            self.assertIsNone(term_unknown)
+
+            # Empty term
+            term_empty = await lookup_defined_term(session, "   ")
+            self.assertIsNone(term_empty)
+
+    async def test_template_module_foreign_keys_and_metadata(self):
+        """Verify that every TemplateModule is linked to a valid ApprovalRule and has real file metadata."""
+        async with async_session_factory() as session:
+            res = await session.execute(select(TemplateModule))
+            templates = res.scalars().all()
+            self.assertEqual(len(templates), 7)
+
+            for t in templates:
+                self.assertIsNotNone(t.default_rule_id)
+                rule_res = await session.execute(
+                    select(ApprovalRule).where(ApprovalRule.id == t.default_rule_id)
+                )
+                rule = rule_res.scalar_one_or_none()
+                self.assertIsNotNone(rule, f"Template {t.module_code} has broken default_rule_id foreign key")
+
+            # Verify knowledge_documents records for templates have real file_size and sha256
+            doc_res = await session.execute(
+                select(KnowledgeDocument).where(KnowledgeDocument.doc_type == "template")
             )
-            rule = rule_res.scalar_one_or_none()
-            assert rule is not None, f"Template {t.module_code} has broken default_rule_id foreign key"
+            tmpl_docs = doc_res.scalars().all()
+            self.assertEqual(len(tmpl_docs), 7)
+            for td in tmpl_docs:
+                self.assertGreater(td.file_size, 0, f"Template doc {td.doc_code} has zero file_size")
+                self.assertIsNotNone(td.sha256)
+                self.assertGreater(len(td.sha256), 32, f"Template doc {td.doc_code} has invalid sha256")
+
+
+if __name__ == "__main__":
+    unittest.main()

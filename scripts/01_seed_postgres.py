@@ -89,6 +89,8 @@ async def verify_database_state() -> bool:
             "приказы по информационным системам",
             "таблица замечаний",
             "визирование модульных документов",
+            "п. 4.1.3",
+            "УТВ-01",
         ]
         for q in sample_queries:
             matches = await search_chunks_fulltext(session, q, top_k=2)
@@ -101,11 +103,11 @@ async def verify_database_state() -> bool:
 
         # 3. Check Canonical Terms Lookup
         print("\n[3/5] CANONICAL GLOSSARY LOOKUP TEST:")
-        sample_terms = ["ИИС ДО", "ЛНА", "ДСП", "РО", "СП"]
+        sample_terms = ["ИИС ДО", "ЛНА", "ДСП", "РО", "СП", "СЭД", "Локальный нормативный акт"]
         for t in sample_terms:
             dt = await lookup_defined_term(session, t)
             if dt:
-                print(f"  Term '{dt['canonical']}': {dt['expansion']} (Doc: {dt['source_doc_code']}, Clause: {dt['clause']})")
+                print(f"  Term '{t}' -> [{dt['canonical']}]: {dt['expansion']} (Doc: {dt['source_doc_code']}, Clause: {dt['clause']})")
             else:
                 print(f"  [WARN] Term '{t}' not found in glossary")
 
@@ -116,20 +118,9 @@ async def verify_database_state() -> bool:
         )
         rules_list = rules_res.scalars().all()
         for r in rules_list:
-            depts = []
-            if r.requires_legal:
-                depts.append("Юр")
-            if r.requires_dou:
-                depts.append("ДОУ")
-            if r.requires_hr:
-                depts.append("Кадры")
-            if r.requires_infosec != "no":
-                depts.append(f"ИБ({r.requires_infosec})")
-            if r.requires_it != "no":
-                depts.append(f"ИТ({r.requires_it})")
-            if r.requires_regional != "no":
-                depts.append(f"РО({r.requires_regional})")
-            print(f"  Rule #{r.rule_number:02d} [{r.category.upper():<8}]: {r.doc_type_name[:45]}... -> [{', '.join(depts)}]")
+            depts = r.extra_info.get("departments", [])
+            dept_str = ", ".join(depts) if depts else "Стандартный маршрут"
+            print(f"  Rule #{r.rule_number:02d} [{r.category.upper():<8}]: {r.doc_type_name[:45]}... -> [{dept_str}]")
 
         # 5. Check Template Modules Dynamic Schemas
         print("\n[5/5] TEMPLATE MODULES DYNAMIC SCHEMAS:")

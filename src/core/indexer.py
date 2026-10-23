@@ -168,8 +168,8 @@ async def save_template_modules(
             version=tm.version,
             access_level="public",
             file_name=tm.file_name,
-            file_size=0,
-            sha256="",
+            file_size=tm.file_size,
+            sha256=tm.sha256,
             chunks=tm.chunks,
         )
         await save_extracted_document(session, template_doc)
@@ -252,13 +252,24 @@ async def index_all_materials(
     return summary
 
 
+import re
+
+
 async def search_chunks_fulltext(
     session: AsyncSession,
     query_text: str,
     top_k: int = 5,
     min_rank: float = 0.01,
 ) -> List[Dict[str, Any]]:
-    """Execute PostgreSQL full-text search against Russian TSVECTOR."""
+    """Execute PostgreSQL full-text search against Russian TSVECTOR with clause and metadata ranking."""
+    if not query_text or not query_text.strip():
+        return []
+
+    clean_query = query_text.strip()
+    # Check for clause pattern (e.g. "4.2.3", "п. 4.2.3", "пункт 10.6")
+    clause_match = re.search(r"\b(\d+(?:\.\d+)+)\b", clean_query)
+    clause_candidate = clause_match.group(1) if clause_match else clean_query
+
     sql = text("""
         SELECT 
             c.id,
@@ -271,20 +282,36 @@ async def search_chunks_fulltext(
             d.title as doc_title,
             d.version,
             d.access_level,
-            ts_rank_cd(c.search_vector, plainto_tsquery('russian', :query)) as rank
+            ts_rank_cd(c.search_vector, plainto_tsquery('russian', :query)) as rank,
+            CASE 
+                WHEN LOWER(c.clause) = LOWER(:clean_query) THEN 100.0
+                WHEN c.clause = :clause_candidate THEN 90.0
+                WHEN LOWER(d.doc_code) = LOWER(:clean_query) THEN 80.0
+                WHEN c.clause ILIKE :like_query THEN 70.0
+                WHEN d.title ILIKE :like_query THEN 60.0
+                WHEN c.search_vector @@ plainto_tsquery('russian', :query) THEN 50.0
+                ELSE 10.0
+            END as match_priority
         FROM document_chunks c
         JOIN knowledge_documents d ON c.document_id = d.id
         WHERE c.search_vector @@ plainto_tsquery('russian', :query)
            OR c.content ILIKE :like_query
-        ORDER BY rank DESC
+           OR c.clause = :clause_candidate
+           OR c.clause ILIKE :like_query
+           OR c.chapter ILIKE :like_query
+           OR d.doc_code ILIKE :like_query
+           OR d.title ILIKE :like_query
+        ORDER BY match_priority DESC, rank DESC, c.page_number ASC
         LIMIT :top_k;
     """)
 
     res = await session.execute(
         sql,
         {
-            "query": query_text,
-            "like_query": f"%{query_text}%",
+            "query": clean_query,
+            "clean_query": clean_query,
+            "clause_candidate": clause_candidate,
+            "like_query": f"%{clean_query}%",
             "top_k": top_k,
         },
     )
@@ -292,6 +319,7 @@ async def search_chunks_fulltext(
     rows = res.fetchall()
     results = []
     for row in rows:
+        score = float(row.rank) if row.rank else (float(row.match_priority) / 100.0)
         results.append({
             "id": str(row.id),
             "chapter": row.chapter,
@@ -303,7 +331,7 @@ async def search_chunks_fulltext(
             "doc_title": row.doc_title,
             "version": row.version,
             "access_level": row.access_level,
-            "relevance_score": float(row.rank) if row.rank else 0.5,
+            "relevance_score": score,
         })
     return results
 
@@ -311,22 +339,64 @@ async def search_chunks_fulltext(
 async def lookup_defined_term(
     session: AsyncSession, term: str
 ) -> Optional[Dict[str, Any]]:
-    """Lookup term or abbreviation definition in glossary."""
-    clean_term = term.strip().upper()
+    """Lookup term or abbreviation definition in glossary with case-insensitivity and expansion support."""
+    if not term or not term.strip():
+        return None
+
+    clean_term = term.strip()
+    upper_term = clean_term.upper()
+
+    # 1. Exact canonical match
     stmt = select(DefinedTerm).where(
-        func.upper(DefinedTerm.canonical) == clean_term
+        func.upper(DefinedTerm.canonical) == upper_term
     )
     res = await session.execute(stmt)
     dt = res.scalar_one_or_none()
-    if not dt:
-        return None
+    if dt:
+        return {
+            "id": str(dt.id),
+            "canonical": dt.canonical,
+            "expansion": dt.expansion,
+            "definition": dt.definition,
+            "source_doc_code": dt.source_doc_code,
+            "clause": dt.clause,
+            "page_number": dt.page_number,
+        }
 
-    return {
-        "id": str(dt.id),
-        "canonical": dt.canonical,
-        "expansion": dt.expansion,
-        "definition": dt.definition,
-        "source_doc_code": dt.source_doc_code,
-        "clause": dt.clause,
-        "page_number": dt.page_number,
-    }
+    # 2. Exact or prefix expansion match
+    stmt_exp = select(DefinedTerm).where(
+        (func.upper(DefinedTerm.expansion) == upper_term)
+        | (DefinedTerm.expansion.ilike(f"{clean_term}%"))
+    )
+    res_exp = await session.execute(stmt_exp)
+    dt_exp = res_exp.scalars().first()
+    if dt_exp:
+        return {
+            "id": str(dt_exp.id),
+            "canonical": dt_exp.canonical,
+            "expansion": dt_exp.expansion,
+            "definition": dt_exp.definition,
+            "source_doc_code": dt_exp.source_doc_code,
+            "clause": dt_exp.clause,
+            "page_number": dt_exp.page_number,
+        }
+
+    # 3. Substring match fallback
+    stmt_sub = select(DefinedTerm).where(
+        DefinedTerm.canonical.ilike(f"%{clean_term}%")
+        | DefinedTerm.expansion.ilike(f"%{clean_term}%")
+    )
+    res_sub = await session.execute(stmt_sub)
+    dt_sub = res_sub.scalars().first()
+    if dt_sub:
+        return {
+            "id": str(dt_sub.id),
+            "canonical": dt_sub.canonical,
+            "expansion": dt_sub.expansion,
+            "definition": dt_sub.definition,
+            "source_doc_code": dt_sub.source_doc_code,
+            "clause": dt_sub.clause,
+            "page_number": dt_sub.page_number,
+        }
+
+    return None

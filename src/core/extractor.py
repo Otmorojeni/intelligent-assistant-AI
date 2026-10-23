@@ -82,8 +82,10 @@ class TemplateModuleDTO:
     reg_number: str
     version: str
     file_name: str
-    fields_schema: List[Dict[str, Any]]
-    default_rule_number: int
+    file_size: int = 0
+    sha256: str = ""
+    fields_schema: List[Dict[str, Any]] = field(default_factory=list)
+    default_rule_number: int = 1
     chunks: List[ExtractedChunk] = field(default_factory=list)
 
 
@@ -154,6 +156,25 @@ def extract_pdf_instruction(pdf_path: Path) -> ExtractedDocument:
             # Detect Chapter Header: "Глава X. Title..."
             m_ch = re.match(r"^(?:Глава|ГЛАВА)\s+(\d+)\.(.*)", line, re.I)
             if m_ch:
+                if current_lines:
+                    content_str = "\n".join(current_lines).strip()
+                    if content_str:
+                        chunks.append(
+                            ExtractedChunk(
+                                chapter=current_chapter,
+                                clause=current_clause,
+                                page_number=current_clause_page,
+                                content=content_str,
+                                metadata={
+                                    "doc_code": "OD-184",
+                                    "chapter_num": current_chapter_num,
+                                    "clause": current_clause,
+                                    "page": current_clause_page,
+                                },
+                            )
+                        )
+                    current_lines = []
+
                 current_chapter_num = int(m_ch.group(1))
                 ch_title = f"Глава {current_chapter_num}.{m_ch.group(2)}"
                 # If chapter title continues on subsequent line before next clause
@@ -165,6 +186,8 @@ def extract_pdf_instruction(pdf_path: Path) -> ExtractedDocument:
                     ch_title += " " + cleaned_lines[i + 1]
                     i += 1
                 current_chapter = " ".join(ch_title.split())
+                current_clause = f"Глава {current_chapter_num}"
+                current_clause_page = page_num
                 i += 1
                 continue
 
@@ -188,11 +211,14 @@ def extract_pdf_instruction(pdf_path: Path) -> ExtractedDocument:
                                 },
                             )
                         )
+                    current_lines = []
                 current_chapter = "Приложения"
+                current_chapter_num = 99
                 current_clause = m_app.group(1).strip()
                 current_clause_page = page_num
-                current_lines = cleaned_lines[i:]
-                break
+                current_lines = [line]
+                i += 1
+                continue
 
             # Detect Clause Header: "X.Y" or "X.Y.Z"
             m_cl = re.match(r"^(\d+\.\d+(?:\.\d+)?)\.?\s*(.*)", line)
@@ -479,6 +505,13 @@ def extract_defined_terms(pdf_doc: ExtractedDocument) -> List[DefinedTermDTO]:
             clause="1.4, 10.11",
             page_number=3,
         ),
+        DefinedTermDTO(
+            canonical="СЭД",
+            expansion="Система электронного документооборота",
+            definition="Автоматизированная система документационного обеспечения управления (в Организации применяется ИИС ДО).",
+            clause="Модуль УТВ-02",
+            page_number=1,
+        ),
     ]
 
     return terms
@@ -497,6 +530,7 @@ def extract_guidelines_document(docx_path: Path) -> ExtractedDocument:
     chunks: List[ExtractedChunk] = []
 
     current_section = "Введение"
+    current_section_num = 0
     current_clause = "Общие сведения"
     clause_lines: List[str] = []
 
@@ -506,10 +540,18 @@ def extract_guidelines_document(docx_path: Path) -> ExtractedDocument:
             continue
 
         # Major section: "1. Общие положения", "2. Создание регистрационной карточки..."
-        m_sec = re.match(r"^(\d+)\.\s+([А-Яа-яA-Za-z].*)", text)
+        # Must start with sequential number, capital letter, and not be a clause like 1.1 or a list item
+        m_sec = re.match(r"^([1-9]\d*)\.\s+([А-ЯЁ].*)", text)
         m_cl = re.match(r"^(\d+\.\d+)\.?\s*(.*)", text)
 
+        is_section_header = False
         if m_sec and not m_cl:
+            sec_num = int(m_sec.group(1))
+            if sec_num == current_section_num + 1:
+                is_section_header = True
+
+        if is_section_header:
+            assert m_sec is not None
             if clause_lines:
                 chunks.append(
                     ExtractedChunk(
@@ -525,8 +567,9 @@ def extract_guidelines_document(docx_path: Path) -> ExtractedDocument:
                     )
                 )
                 clause_lines = []
-            current_section = f"Раздел {m_sec.group(1)}. {m_sec.group(2)}"
-            current_clause = f"Раздел {m_sec.group(1)}"
+            current_section_num = int(m_sec.group(1))
+            current_section = f"Раздел {current_section_num}. {m_sec.group(2).strip()}"
+            current_clause = f"Раздел {current_section_num}"
             clause_lines = [text]
         elif m_cl:
             if clause_lines:
@@ -1405,6 +1448,8 @@ def extract_template_modules(materials_dir: Path) -> List[TemplateModuleDTO]:
 
         file_path = matched_file
         file_name = normalize_unicode(file_path.name)
+        file_size = file_path.stat().st_size
+        sha256 = compute_file_hash(file_path)
         doc = docx.Document(file_path)
 
         # Extract text chunks from template
@@ -1431,6 +1476,8 @@ def extract_template_modules(materials_dir: Path) -> List[TemplateModuleDTO]:
                 reg_number=cfg["reg_number"],
                 version="1.0",
                 file_name=file_name,
+                file_size=file_size,
+                sha256=sha256,
                 fields_schema=cfg["fields"],
                 default_rule_number=cfg["default_rule_number"],
                 chunks=[chunk],

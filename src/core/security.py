@@ -218,18 +218,23 @@ def require_role(allowed_roles: Union[List[str], Set[str]]):
     ) -> UserContext:
         if current_user.role not in normalized_allowed:
             client_ip = request.client.host if request.client else None
-            await log_audit_event(
-                session=session,
-                user_role=current_user.role,
-                user_name=current_user.username,
-                action_type="access_denied",
-                query_text=f"Unauthorized access attempt to {request.url.path} [{request.method}]",
-                response_summary=f"Forbidden: role '{current_user.role}' required one of {sorted(list(normalized_allowed))}",
-                status="forbidden",
-                latency_ms=0.0,
-                ip_address=client_ip,
-            )
-            await session.commit()
+            try:
+                await log_audit_event(
+                    session=session,
+                    user_role=current_user.role,
+                    user_name=current_user.username,
+                    action_type="access_denied",
+                    query_text=f"Unauthorized access attempt to {request.url.path} [{request.method}]",
+                    response_summary=f"Forbidden: role '{current_user.role}' required one of {sorted(list(normalized_allowed))}",
+                    status="forbidden",
+                    latency_ms=0.0,
+                    ip_address=client_ip,
+                )
+                await session.commit()
+            except Exception as audit_err:
+                logger.error(f"Failed to record access_denied audit event: {audit_err}")
+                await session.rollback()
+
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Forbidden: role '{current_user.role}' lacks permission for this operation. Required: {sorted(list(normalized_allowed))}",
@@ -243,11 +248,11 @@ def require_role(allowed_roles: Union[List[str], Set[str]]):
 PROMPT_INJECTION_PATTERNS = [
     # English jailbreak & override
     r"(?i)\b(?:ignore|disregard|forget|bypass|override)\b.*?\b(?:previous|prior|above|all)\b.*?\b(?:instructions|rules|prompts|directives)\b",
-    r"(?i)\b(?:system\s+prompt|reveal\s+prompt|show\s+prompt|print\s+instructions)\b",
+    r"(?i)\b(?:system\s+prompt|reveal\s+(?:system\s+)?prompt|show\s+system\s+prompt|print\s+system\s+instructions)\b",
     r"(?i)\b(?:act\s+as|pretend\s+to\s+be|you\s+are\s+now)\b.*?\b(?:dan|jailbreak|developer\s+mode|unrestricted)\b",
     # Russian jailbreak & override
     r"(?i)\b(?:игнорируй|забудь|отмени|сбрось|обойти)\b.*?\b(?:все|предыдущие|ранее\s+данные)?\b.*?\b(?:инструкции|правила|указания|промпты)\b",
-    r"(?i)\b(?:покажи|раскрой|выведи|напечатай)\b.*?\b(?:системный\s+промпт|инструкцию|правила\s+системы|исходный\s+текст)\b",
+    r"(?i)\b(?:покажи|раскрой|выведи|напечатай)\b.*?\b(?:системный\s+промпт|системную\s+инструкцию|скрытые\s+инструкции|внутренние\s+правила\s+модели|исходный\s+промпт)\b",
     r"(?i)\b(?:ты\s+теперь|действуй\s+как|притворись)\b.*?\b(?:dan|взлом|режим\s+разработчика|без\s+ограничений)\b",
     # Script / HTML injection
     r"(?i)<\s*(?:script|iframe|svg|object|embed|style)\b",

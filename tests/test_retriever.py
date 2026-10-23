@@ -53,7 +53,7 @@ class TestRetriever(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(get_allowed_access_levels(""), ["public"])
 
         self.assertEqual(get_allowed_access_levels("dou_specialist"), ["dsp", "public"])
-        self.assertEqual(get_allowed_access_levels("security_auditor"), ["dsp", "public"])
+        self.assertEqual(get_allowed_access_levels("security_auditor"), ["confidential", "dsp", "public"])
         self.assertEqual(get_allowed_access_levels("admin"), ["confidential", "dsp", "public", "secret"])
 
     def test_clause_segment_isolation_no_false_positive(self):

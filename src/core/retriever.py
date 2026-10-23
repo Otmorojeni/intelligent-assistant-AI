@@ -19,25 +19,12 @@ from src.schemas.api_models import DetectedTermRef, SourceRef
 
 logger = logging.getLogger(__name__)
 
-# RBAC access hierarchy
-ROLE_ACCESS_PERMISSIONS: Dict[str, Set[str]] = {
-    "employee": {"public"},
-    "user": {"public"},
-    "public": {"public"},
-    "dou_specialist": {"public", "dsp"},
-    "specialist": {"public", "dsp"},
-    "security_auditor": {"public", "dsp"},
-    "auditor": {"public", "dsp"},
-    "admin": {"public", "dsp", "confidential", "secret"},
-    "dsp": {"public", "dsp"},
-}
+from src.core.security import get_role_access_levels
 
 
 def get_allowed_access_levels(user_role: str) -> List[str]:
     """Return list of allowed document access_level values for given user role."""
-    role_key = (user_role or "employee").strip().lower()
-    allowed = ROLE_ACCESS_PERMISSIONS.get(role_key, {"public"})
-    return sorted(list(allowed))
+    return get_role_access_levels(user_role)
 
 
 def extract_clause_identifiers(query: str) -> List[str]:

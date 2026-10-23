@@ -111,6 +111,7 @@ async def process_query(
     session: AsyncSession,
     request: QueryRequest,
     ip_address: Optional[str] = None,
+    user_name: str = "Пользователь",
     llm_client: Optional[OllamaClient] = None,
 ) -> QueryResponse:
     """Execute end-to-end question answering pipeline with Zero-Hallucination Guard and stage profiling."""
@@ -161,6 +162,7 @@ async def process_query(
         await log_audit_event(
             session=session,
             user_role=request.user_role,
+            user_name=user_name,
             query_text=request.query,
             response_summary=ZERO_HALLUCINATION_REFUSAL,
             status="zero_hallucination",
@@ -197,6 +199,7 @@ async def process_query(
     await log_audit_event(
         session=session,
         user_role=request.user_role,
+        user_name=user_name,
         query_text=request.query,
         response_summary=answer,
         status="success",

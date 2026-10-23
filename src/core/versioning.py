@@ -21,7 +21,12 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
-from src.core.extractor import ExtractedChunk, ExtractedDocument
+from src.core.extractor import (
+    ExtractedChunk,
+    ExtractedDocument,
+    clean_pdf_text_line,
+    extract_guidelines_document,
+)
 from src.db.models import AuditLog, DocumentChunk, KnowledgeDocument
 from src.schemas.api_models import AuditLogItem, DocumentVersionItem
 
@@ -52,74 +57,107 @@ def parse_uploaded_document(
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
 
+    suffix = file_path.suffix.lower()
+    if suffix not in [".pdf", ".docx", ".doc"]:
+        raise ValueError(
+            f"Unsupported file format '{suffix}'. Supported formats: .pdf, .docx, .doc"
+        )
+
     file_size = file_path.stat().st_size
     sha256 = compute_file_hash(file_path)
-    suffix = file_path.suffix.lower()
     chunks: List[ExtractedChunk] = []
 
     if suffix == ".pdf":
-        doc = pymupdf.open(file_path)
-        current_chapter = "Титульный лист и общие положения"
-        current_clause = "1.1"
-        current_page = 1
-        current_lines: List[str] = []
+        try:
+            doc = pymupdf.open(file_path)
+        except Exception as e:
+            raise ValueError(f"Failed to open PDF document: {e}") from e
 
-        for p_idx in range(len(doc)):
-            page_num = p_idx + 1
-            page_text = doc[p_idx].get_text().replace("\xa0", " ")
-            lines = [l.strip() for l in page_text.split("\n") if l.strip()]
+        if doc.is_encrypted:
+            doc.close()
+            raise ValueError("Uploaded PDF is password protected or encrypted.")
 
-            for line in lines:
-                m_chap = re.match(r"^(?:Глава|Раздел)\s+(\d+)\.?\s*(.*)", line, re.I)
-                m_cl = re.match(r"^(\d+\.\d+(?:\.\d+)*)\.?\s*(.*)", line)
+        with doc:
+            current_chapter = "Титульный лист и общие положения"
+            current_clause = "1.1"
+            current_page = 1
+            current_lines: List[str] = []
 
-                if m_chap:
-                    if current_lines:
-                        chunks.append(
-                            ExtractedChunk(
-                                chapter=current_chapter,
-                                clause=current_clause,
-                                page_number=current_page,
-                                content="\n".join(current_lines),
-                                metadata={"doc_code": doc_code, "version": version, "clause": current_clause},
+            for p_idx in range(len(doc)):
+                page_num = p_idx + 1
+                page_text = doc[p_idx].get_text().replace("\xa0", " ")
+                lines = [clean_pdf_text_line(l) for l in page_text.split("\n")]
+                lines = [l for l in lines if l]
+
+                for line in lines:
+                    m_chap = re.match(r"^(?:Глава|Раздел)\s+(\d+)\.?\s*(.*)", line, re.I)
+                    m_cl = re.match(r"^(\d+\.\d+(?:\.\d+)*)\.?\s*(.*)", line)
+
+                    if m_chap:
+                        if current_lines:
+                            chunks.append(
+                                ExtractedChunk(
+                                    chapter=current_chapter,
+                                    clause=current_clause,
+                                    page_number=current_page,
+                                    content="\n".join(current_lines),
+                                    metadata={"doc_code": doc_code, "version": version, "clause": current_clause},
+                                )
                             )
-                        )
-                        current_lines = []
-                    current_chapter = line
-                    current_clause = f"{m_chap.group(1)}.0"
-                    current_page = page_num
-                elif m_cl:
-                    if current_lines:
-                        chunks.append(
-                            ExtractedChunk(
-                                chapter=current_chapter,
-                                clause=current_clause,
-                                page_number=current_page,
-                                content="\n".join(current_lines),
-                                metadata={"doc_code": doc_code, "version": version, "clause": current_clause},
+                            current_lines = []
+                        current_chapter = line
+                        current_clause = f"{m_chap.group(1)}.0"
+                        current_page = page_num
+                    elif m_cl:
+                        if current_lines:
+                            chunks.append(
+                                ExtractedChunk(
+                                    chapter=current_chapter,
+                                    clause=current_clause,
+                                    page_number=current_page,
+                                    content="\n".join(current_lines),
+                                    metadata={"doc_code": doc_code, "version": version, "clause": current_clause},
+                                )
                             )
-                        )
-                        current_lines = []
-                    current_clause = m_cl.group(1)
-                    current_page = page_num
-                    current_lines.append(line)
-                else:
-                    current_lines.append(line)
+                            current_lines = []
+                        current_clause = m_cl.group(1)
+                        current_page = page_num
+                        current_lines.append(line)
+                    else:
+                        current_lines.append(line)
 
-        if current_lines:
-            chunks.append(
-                ExtractedChunk(
-                    chapter=current_chapter,
-                    clause=current_clause,
-                    page_number=current_page,
-                    content="\n".join(current_lines),
-                    metadata={"doc_code": doc_code, "version": version, "clause": current_clause},
+            if current_lines:
+                chunks.append(
+                    ExtractedChunk(
+                        chapter=current_chapter,
+                        clause=current_clause,
+                        page_number=current_page,
+                        content="\n".join(current_lines),
+                        metadata={"doc_code": doc_code, "version": version, "clause": current_clause},
+                    )
                 )
-            )
-        doc.close()
 
     elif suffix in [".docx", ".doc"]:
-        doc = docx.Document(file_path)
+        if doc_type in ["guideline", "guidelines"]:
+            try:
+                extracted = extract_guidelines_document(file_path)
+                extracted.doc_code = doc_code
+                extracted.title = title
+                extracted.version = version
+                extracted.doc_type = doc_type
+                extracted.access_level = access_level
+                for c in extracted.chunks:
+                    c.metadata["doc_code"] = doc_code
+                    c.metadata["version"] = version
+                return extracted
+            except Exception as e:
+                logger.warning(f"Guidelines extractor failed, falling back to generic docx parser: {e}")
+
+        try:
+            doc = docx.Document(file_path)
+        except Exception as e:
+            raise ValueError(f"Failed to open DOCX document: {e}") from e
+
         current_chapter = "Общие положения"
         current_clause = "1.1"
         current_lines: List[str] = []
@@ -211,18 +249,46 @@ async def upload_document_version(
     """Save uploaded document edition, archive previous versions, parse chunks, and commit hot-reload."""
     from src.core.indexer import save_extracted_document
 
+    clean_code = doc_code.strip()
+    clean_version = version.strip()
+    clean_title = title.strip()
+    clean_type = doc_type.strip()
+    clean_access = access_level.strip().lower()
+
     safe_filename = Path(file_name).name
-    target_path = UPLOADS_DIR / f"{doc_code}_v{version}_{safe_filename}"
+    target_path = UPLOADS_DIR / f"{clean_code}_v{clean_version}_{safe_filename}"
     with open(target_path, "wb") as f:
         f.write(file_bytes)
 
-    # 1. Fetch existing documents with the same doc_code
-    stmt = select(KnowledgeDocument).where(KnowledgeDocument.doc_code == doc_code)
+    # 1. Parse the uploaded file on the fly FIRST before making any DB changes!
+    try:
+        extracted_doc = parse_uploaded_document(
+            file_path=target_path,
+            doc_code=clean_code,
+            title=clean_title,
+            version=clean_version,
+            doc_type=clean_type,
+            access_level=clean_access,
+        )
+    except Exception as e:
+        if target_path.exists():
+            try:
+                target_path.unlink()
+            except Exception:
+                pass
+        raise ValueError(f"Failed to parse uploaded document: {e}") from e
+
+    # 2. Lock and fetch existing documents with the same doc_code
+    stmt = (
+        select(KnowledgeDocument)
+        .where(KnowledgeDocument.doc_code == clean_code)
+        .with_for_update()
+    )
     existing_docs = (await session.execute(stmt)).scalars().all()
 
-    # 2. Archive previous versions or remove duplicate same version
+    # 3. Archive previous versions or remove duplicate same version
     for prev_doc in existing_docs:
-        if prev_doc.version == version:
+        if prev_doc.version == clean_version:
             # Overwriting the exact same version edition
             await session.delete(prev_doc)
         else:
@@ -230,24 +296,14 @@ async def upload_document_version(
 
     await session.flush()
 
-    # 3. Parse the uploaded file on the fly
-    extracted_doc = parse_uploaded_document(
-        file_path=target_path,
-        doc_code=doc_code,
-        title=title,
-        version=version,
-        doc_type=doc_type,
-        access_level=access_level,
-    )
-
     # 4. Save new document and chunks with search_vector computed column
     db_doc = await save_extracted_document(session, extracted_doc)
     await session.commit()
     await session.refresh(db_doc)
 
     logger.info(
-        f"Uploaded and activated new document edition: {doc_code} v{version} "
-        f"({len(extracted_doc.chunks)} chunks, access={access_level})"
+        f"Uploaded and activated new document edition: {clean_code} v{clean_version} "
+        f"({len(extracted_doc.chunks)} chunks, access={clean_access})"
     )
     return db_doc
 
@@ -258,18 +314,25 @@ async def activate_document_version(
     version: str,
 ) -> KnowledgeDocument:
     """Switch active document edition: sets target to is_active=True, others to is_active=False."""
-    stmt = select(KnowledgeDocument).where(KnowledgeDocument.doc_code == doc_code)
+    clean_code = (doc_code or "").strip()
+    clean_version = (version or "").strip()
+
+    stmt = (
+        select(KnowledgeDocument)
+        .where(KnowledgeDocument.doc_code == clean_code)
+        .with_for_update()
+    )
     docs = (await session.execute(stmt)).scalars().all()
 
     if not docs:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Document with code '{doc_code}' not found.",
+            detail=f"Document with code '{clean_code}' not found.",
         )
 
     target_doc: Optional[KnowledgeDocument] = None
     for d in docs:
-        if d.version == version:
+        if d.version == clean_version:
             target_doc = d
             d.is_active = True
         else:
@@ -278,12 +341,12 @@ async def activate_document_version(
     if not target_doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Version '{version}' for document '{doc_code}' not found.",
+            detail=f"Version '{clean_version}' for document '{clean_code}' not found.",
         )
 
     await session.commit()
     await session.refresh(target_doc)
-    logger.info(f"Activated document edition {doc_code} v{version}")
+    logger.info(f"Activated document edition {clean_code} v{clean_version}")
     return target_doc
 
 

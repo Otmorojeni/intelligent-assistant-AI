@@ -117,11 +117,9 @@ async def handle_query(
     """Handle natural language question answering with approval recommendation, RBAC, and prompt injection guard."""
     client_ip = raw_request.client.host if raw_request.client else None
 
-    # Determine effective role: X-User-Role / Bearer header takes precedence if provided; otherwise request body
-    header_role = raw_request.headers.get("X-User-Role")
-    if header_role:
-        effective_role = normalize_role(header_role)
-    elif current_user.role != UserRole.EMPLOYEE.value:
+    # Determine effective role: credentials (Authorization Bearer or X-User-Role) take precedence
+    has_auth_header = bool(raw_request.headers.get("Authorization") or raw_request.headers.get("X-User-Role"))
+    if has_auth_header:
         effective_role = current_user.role
     elif request.user_role:
         effective_role = normalize_role(request.user_role)
@@ -162,7 +160,12 @@ async def handle_query(
             latency_ms=0.0,
         )
 
-    return await process_query(session=session, request=request, ip_address=client_ip)
+    return await process_query(
+        session=session,
+        request=request,
+        ip_address=client_ip,
+        user_name=current_user.username,
+    )
 
 
 @router.get(
@@ -326,6 +329,14 @@ async def upload_version(
             detail="Uploaded file is empty.",
         )
 
+    safe_name = file.filename or f"{doc_code}.pdf"
+    suffix = Path(safe_name).suffix.lower()
+    if suffix not in [".pdf", ".docx", ".doc"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file extension '{suffix}'. Only .pdf and .docx documents are supported.",
+        )
+
     clean_access = access_level.strip().lower()
     if clean_access not in ["public", "dsp", "confidential", "secret"]:
         raise HTTPException(
@@ -333,16 +344,22 @@ async def upload_version(
             detail=f"Invalid access_level '{access_level}'. Allowed: public, dsp, confidential, secret.",
         )
 
-    db_doc = await upload_document_version(
-        session=session,
-        file_bytes=file_bytes,
-        file_name=file.filename or f"{doc_code}.pdf",
-        doc_code=doc_code.strip(),
-        title=title.strip(),
-        version=version.strip(),
-        doc_type=doc_type.strip(),
-        access_level=clean_access,
-    )
+    try:
+        db_doc = await upload_document_version(
+            session=session,
+            file_bytes=file_bytes,
+            file_name=safe_name,
+            doc_code=doc_code.strip(),
+            title=title.strip(),
+            version=version.strip(),
+            doc_type=doc_type.strip(),
+            access_level=clean_access,
+        )
+    except ValueError as val_err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(val_err),
+        )
 
     await log_audit_event(
         session=session,

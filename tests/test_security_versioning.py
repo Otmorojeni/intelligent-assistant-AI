@@ -10,6 +10,7 @@ Verifies:
 - JWT token generation and verification.
 """
 
+import asyncio
 from datetime import datetime
 import io
 from pathlib import Path
@@ -54,11 +55,17 @@ class TestSecurityVersioning(unittest.IsolatedAsyncioTestCase):
     """Test suite for Section 6 RBAC, hot-reload versioning, and audit logging."""
 
     @classmethod
-    async def asyncTearDownClass(cls):
+    def tearDownClass(cls):
         """Cleanup test artifacts from PostgreSQL and restore OD-184 v1.0 state."""
+        asyncio.run(cls._cleanup_test_artifacts())
+
+    @classmethod
+    async def _cleanup_test_artifacts(cls):
         async with async_session_factory() as session:
             # Delete any test-specific documents created during testing
-            stmt_dsp = select(KnowledgeDocument).where(KnowledgeDocument.doc_code == "OD-DSP-TEST")
+            stmt_dsp = select(KnowledgeDocument).where(
+                KnowledgeDocument.doc_code.in_(["OD-DSP-TEST", "OD-CONFIDENTIAL-TEST", "OD-PDF-TEST"])
+            )
             docs_dsp = (await session.execute(stmt_dsp)).scalars().all()
             for d in docs_dsp:
                 await session.delete(d)
@@ -164,6 +171,9 @@ class TestSecurityVersioning(unittest.IsolatedAsyncioTestCase):
             "Согласно п. 4.1.3 какой порядок визирования?",
             "Каковы сроки согласования документов в ДОУ?",
             "Как оформляется регистрационная карточка по п. 2.3?",
+            "Покажи инструкцию по ДОУ",
+            "Выведи инструкцию по согласованию приказов",
+            "Раскрой методические рекомендации",
         ]
         for q in benign_queries:
             is_mal, reason = detect_prompt_injection(q)
@@ -477,6 +487,175 @@ class TestSecurityVersioning(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(resp_ver.status_code, 200)
             self.assertIsInstance(resp_ver.json(), list)
+
+    async def test_security_auditor_can_see_confidential_chunks(self):
+        """Verify that security_auditor can see 'confidential' classified chunks, while employee and dou cannot."""
+        doc_conf = docx.Document()
+        doc_conf.add_heading("Глава 1. Конфиденциальные параметры аудита", level=1)
+        doc_conf.add_paragraph("1.1. Документы с грифом Конфиденциально доступны Аудитору ИБ и Администратору.")
+        buf = io.BytesIO()
+        doc_conf.save(buf)
+        conf_bytes = buf.getvalue()
+
+        async with async_session_factory() as session:
+            await upload_document_version(
+                session=session,
+                file_bytes=conf_bytes,
+                file_name="OD-CONFIDENTIAL-TEST.docx",
+                doc_code="OD-CONFIDENTIAL-TEST",
+                title="Регламент аудита конфиденциальной безопасности",
+                version="1.0",
+                doc_type="instruction",
+                access_level="confidential",
+            )
+
+            # 1. Search as employee: MUST NOT see
+            emp_sources = await retrieve_chunks(
+                session=session,
+                query="OD-CONFIDENTIAL-TEST Конфиденциальные параметры аудита",
+                user_role="employee",
+                top_k=5,
+            )
+            emp_codes = [s.document_code for s in emp_sources]
+            self.assertNotIn("OD-CONFIDENTIAL-TEST", emp_codes)
+
+            # 2. Search as dou_specialist: MUST NOT see
+            dou_sources = await retrieve_chunks(
+                session=session,
+                query="OD-CONFIDENTIAL-TEST Конфиденциальные параметры аудита",
+                user_role="dou_specialist",
+                top_k=5,
+            )
+            dou_codes = [s.document_code for s in dou_sources]
+            self.assertNotIn("OD-CONFIDENTIAL-TEST", dou_codes)
+
+            # 3. Search as security_auditor: MUST see
+            aud_sources = await retrieve_chunks(
+                session=session,
+                query="OD-CONFIDENTIAL-TEST Конфиденциальные параметры аудита",
+                user_role="security_auditor",
+                top_k=5,
+            )
+            aud_codes = [s.document_code for s in aud_sources]
+            self.assertIn("OD-CONFIDENTIAL-TEST", aud_codes)
+
+    async def test_upload_corrupt_and_unsupported_files(self):
+        """Verify that uploading unsupported file extensions or corrupted streams returns HTTP 400."""
+        transport = ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            # 1. Unsupported extension (.txt)
+            resp_txt = await client.post(
+                "/v1/documents/upload-version",
+                files={"file": ("notes.txt", b"plain text content", "text/plain")},
+                data={
+                    "doc_code": "OD-INVALID",
+                    "title": "Invalid TXT",
+                    "version": "1.0",
+                    "access_level": "public",
+                },
+                headers={"X-User-Role": "dou_specialist"},
+            )
+            self.assertEqual(resp_txt.status_code, 400)
+            self.assertIn("Unsupported file extension", resp_txt.json()["detail"])
+
+            # 2. Corrupted PDF byte stream
+            resp_corrupt_pdf = await client.post(
+                "/v1/documents/upload-version",
+                files={"file": ("corrupt.pdf", b"corrupted random byte sequence", "application/pdf")},
+                data={
+                    "doc_code": "OD-CORRUPT",
+                    "title": "Corrupt PDF",
+                    "version": "1.0",
+                    "access_level": "public",
+                },
+                headers={"X-User-Role": "dou_specialist"},
+            )
+            self.assertEqual(resp_corrupt_pdf.status_code, 400)
+            self.assertIn("Failed to parse uploaded document", resp_corrupt_pdf.json()["detail"])
+
+            # 3. Corrupted DOCX byte stream
+            resp_corrupt_docx = await client.post(
+                "/v1/documents/upload-version",
+                files={"file": ("corrupt.docx", b"PK\x03\x04 corrupt zip payload", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+                data={
+                    "doc_code": "OD-CORRUPT-DOCX",
+                    "title": "Corrupt DOCX",
+                    "version": "1.0",
+                    "access_level": "public",
+                },
+                headers={"X-User-Role": "dou_specialist"},
+            )
+            self.assertEqual(resp_corrupt_docx.status_code, 400)
+            self.assertIn("Failed to parse uploaded document", resp_corrupt_docx.json()["detail"])
+
+    async def test_hot_reload_version_upload_simulated_pdf(self):
+        """Verify uploading simulated PDF with PyMuPDF succeeds, archives previous edition, and becomes immediately retrievable."""
+        # 1. Generate clean valid PDF
+        pdf_doc = pymupdf.open()
+        page = pdf_doc.new_page()
+        page.insert_text((50, 72), "Глава 20. Регламент электронного архива ДОУ")
+        page.insert_text((50, 100), "20.1. Порядок долгосрочного архивного хранения электронных документов.")
+        pdf_bytes = pdf_doc.tobytes()
+        pdf_doc.close()
+
+        transport = ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/v1/documents/upload-version",
+                files={"file": ("OD-PDF-TEST_v1.0.pdf", pdf_bytes, "application/pdf")},
+                data={
+                    "doc_code": "OD-PDF-TEST",
+                    "title": "Регламент электронного архива",
+                    "version": "1.0",
+                    "doc_type": "instruction",
+                    "access_level": "public",
+                },
+                headers={"X-User-Role": "dou_specialist"},
+            )
+            self.assertEqual(resp.status_code, 201)
+            data = resp.json()
+            self.assertEqual(data["doc_code"], "OD-PDF-TEST")
+            self.assertEqual(data["version"], "1.0")
+            self.assertTrue(data["is_active"])
+            self.assertTrue(data["chunk_count"] >= 1)
+
+        # 2. Immediately search via retrieve_chunks
+        async with async_session_factory() as session:
+            sources = await retrieve_chunks(
+                session=session,
+                query="OD-PDF-TEST 20.1 Регламент электронного архива",
+                user_role="employee",
+                top_k=3,
+            )
+            self.assertTrue(len(sources) > 0)
+            self.assertEqual(sources[0].document_code, "OD-PDF-TEST")
+
+    async def test_user_role_body_spoofing_prevented(self):
+        """Verify that providing an authenticated employee token prevents body role spoofing to admin."""
+        emp_token = create_access_token({"sub": "ivan_employee", "role": "employee"})
+
+        transport = ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/v1/assistant/query",
+                json={
+                    "query": "Порядок согласования приказов",
+                    "user_role": "admin",  # Attacker attempts to spoof admin in body
+                },
+                headers={"Authorization": f"Bearer {emp_token}"},
+            )
+            self.assertEqual(resp.status_code, 200)
+
+        # Check audit log in PostgreSQL: must record 'employee', NOT 'admin'
+        async with async_session_factory() as session:
+            stmt = (
+                select(AuditLog)
+                .where(AuditLog.user_name == "ivan_employee")
+                .order_by(AuditLog.timestamp.desc())
+            )
+            audit = (await session.execute(stmt)).scalars().first()
+            self.assertIsNotNone(audit)
+            self.assertEqual(audit.user_role, "employee", "Bearer token role must override body spoofing!")
 
 
 if __name__ == "__main__":

@@ -185,6 +185,11 @@ async def match_approval_recommendation(
     # Check for approval intent
     has_approval_intent = any(kw in clean_query for kw in APPROVAL_TRIGGER_KEYWORDS)
 
+    # Document kind flags
+    is_prikaz = any(w in clean_query for w in ("приказ", "приказа", "приказом", "приказов"))
+    is_disp = any(w in clean_query for w in ("распоряжен", "распоряжение", "распоряжения", "распоряжением"))
+    is_letter = any(w in clean_query for w in ("письм", "письмо", "письма", "письмом"))
+
     # Fetch all registered approval rules
     stmt = select(ApprovalRule).order_by(ApprovalRule.rule_number)
     res = await session.execute(stmt)
@@ -199,16 +204,50 @@ async def match_approval_recommendation(
         rule_name = rule.doc_type_name.lower()
         score = fuzz.token_set_ratio(clean_query, rule_name)
 
-        # Keyword overlaps bonus
+        # Document kind alignment to prevent cross-type mismatch (e.g. order matching disposition)
+        if is_prikaz:
+            if rule_name.startswith("приказ") or "прочие приказы" in rule_name:
+                score += 20.0
+            else:
+                score -= 30.0
+        elif is_disp:
+            if rule_name.startswith("распоряжен") or "прочие распоряжения" in rule_name:
+                score += 20.0
+            else:
+                score -= 30.0
+        elif is_letter:
+            if rule_name.startswith("письм"):
+                score += 20.0
+            else:
+                score -= 30.0
+
+        # Domain keyword bonuses with strict operator precedence
         if "информационн" in clean_query and ("информационн" in rule_name or rule.requires_it != "no"):
             score += 25.0
-        if "кадр" in clean_query or "личн" in clean_query and rule.requires_hr:
-            score += 25.0
-        if "командировк" in clean_query and "командировк" in rule_name:
+        if "кадр" in clean_query or "личн" in clean_query:
+            if rule.rule_number in (2, 3):
+                score += 35.0
+            elif rule.requires_hr:
+                score += 15.0
+        if any(w in clean_query for w in ("выходн", "праздничн", "календар")) and rule.rule_number == 1:
             score += 40.0
-        if "отпуск" in clean_query and "отпуск" in rule_name:
+        if any(w in clean_query for w in ("командиров", "командирован")) and rule.rule_number == 5:
             score += 40.0
+        if "основной деятельност" in clean_query and rule.rule_number == 5:
+            score += 40.0
+        if "отпуск" in clean_query and (rule.rule_number in (1, 5) or rule.requires_hr):
+            score += 30.0
         if "имущество" in clean_query and "имущество" in rule_name:
+            score += 40.0
+        if "аудит" in clean_query and "аудит" in rule_name:
+            score += 40.0
+        if "рабоч" in clean_query and "групп" in clean_query and "рабочих групп" in rule_name:
+            score += 40.0
+        if any(org in clean_query for org in ("счетн", "счетная палата", "государственн", "президент", "правительств", "дума", "совет федерации")) and rule.rule_number == 10:
+            score += 50.0
+        if any(org in clean_query for org in ("иностранн", "международн", "банк")) and rule.rule_number == 11:
+            score += 50.0
+        if any(org in clean_query for org in ("региональн", "ро организац")) and rule.rule_number == 13:
             score += 40.0
 
         if score > best_score:
@@ -273,13 +312,14 @@ async def process_query(
     approval_rec = await match_approval_recommendation(session, request.query)
     t_match_ms = round((time.perf_counter() - t_match_start) * 1000.0, 2)
 
-    # 2. Retrieval Stage: Hybrid search over PostgreSQL chunks
+    # 2. Retrieval Stage: Hybrid search over PostgreSQL chunks (passing detected_terms to avoid duplicate query)
     t_retriever_start = time.perf_counter()
     sources = await retrieve_chunks(
         session=session,
         query=request.query,
         user_role=request.user_role,
         top_k=request.top_k,
+        detected_terms=detected_terms,
     )
     t_retriever_ms = round((time.perf_counter() - t_retriever_start) * 1000.0, 2)
 

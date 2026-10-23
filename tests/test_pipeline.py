@@ -101,9 +101,9 @@ class TestPipeline(unittest.IsolatedAsyncioTestCase):
         self.assertIn("стр. 12", answer)
 
     async def test_match_approval_recommendation(self):
-        """Verify routing rule detection for IT and personal orders."""
+        """Verify routing rule detection for IT, personnel, working groups, letters, and business trips."""
         async with async_session_factory() as session:
-            # IT information system order -> Rule 4
+            # 1. IT information system order -> Rule 4
             rec_it = await match_approval_recommendation(
                 session, "С кем согласовать приказ о вводе в эксплуатацию информационной системы?"
             )
@@ -113,9 +113,53 @@ class TestPipeline(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(any("информационных технологий" in d.lower() for d in dept_names))
             self.assertTrue(any("информационной безопасности" in d.lower() for d in dept_names))
 
-            # Non-approval query -> None
+            # 2. Personnel order -> Rule 2 or 3 (requires HR)
+            rec_hr = await match_approval_recommendation(
+                session, "С кем согласовать приказ по личному составу?"
+            )
+            self.assertIsNotNone(rec_hr)
+            self.assertIn(rec_hr.rule_number, (2, 3))
+            dept_names_hr = [stage.department for stage in rec_hr.stages]
+            self.assertTrue(any("кадр" in d.lower() for d in dept_names_hr))
+
+            # 3. Working group disposition -> Rule 7
+            rec_wg = await match_approval_recommendation(
+                session, "Порядок согласования распоряжения о создании рабочей группы"
+            )
+            self.assertIsNotNone(rec_wg)
+            self.assertEqual(rec_wg.rule_number, 7)
+
+            # 4. Business trip order -> Rule 5 (other orders)
+            rec_trip = await match_approval_recommendation(
+                session, "Маршрут согласования приказа о командировании"
+            )
+            self.assertIsNotNone(rec_trip)
+            self.assertEqual(rec_trip.rule_number, 5)
+
+            # 5. Letter to Accounts Chamber / State Authorities -> Rule 10
+            rec_acc = await match_approval_recommendation(
+                session, "С кем согласовывать письмо в Счетную палату РФ?"
+            )
+            self.assertIsNotNone(rec_acc)
+            self.assertEqual(rec_acc.rule_number, 10)
+
+            # 6. Non-approval query -> None
             rec_none = await match_approval_recommendation(session, "Что такое ИИС ДО?")
             self.assertIsNone(rec_none)
+
+    async def test_zero_hallucination_blocks_llm_invocation(self):
+        """Verify that out-of-domain query NEVER invokes LLM client methods."""
+        class ExplodingLLMClient(OllamaClient):
+            async def generate_answer(self, *args, **kwargs):
+                raise AssertionError("LLM generate_answer MUST NOT be called when Zero-Hallucination Guard triggers!")
+
+        async with async_session_factory() as session:
+            req = QueryRequest(query="Рецепт шарлотки с яблоками", user_role="employee")
+            resp = await process_query(session, req, llm_client=ExplodingLLMClient())
+            self.assertTrue(resp.zero_hallucination_triggered)
+            self.assertEqual(resp.answer, ZERO_HALLUCINATION_REFUSAL)
+            self.assertEqual(resp.sources, [])
+            self.assertEqual(resp.t_llm_ms, 0.0)
 
     async def test_end_to_end_process_query(self):
         """Verify full pipeline execution, latencies breakdown, terms, sources, and audit trail."""
@@ -128,8 +172,8 @@ class TestPipeline(unittest.IsolatedAsyncioTestCase):
                 top_k=3,
             )
 
-            # Using client with offline fallback if Ollama generation is slow
-            client = OllamaClient(timeout=15.0)
+            # Client configured with reasonable timeout
+            client = OllamaClient(timeout=30.0)
             resp = await process_query(session, req, llm_client=client, ip_address="127.0.0.1")
 
             self.assertEqual(resp.request_id, req_id)

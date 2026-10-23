@@ -17,13 +17,14 @@ from src.schemas.api_models import DetectedTermRef, SourceRef
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """Вы — официальный интеллектуальный ассистент по нормативным документам документационного обеспечения управления (ДОУ).
-Ваша задача — сформировать точный, строгий и аргументированный ответ на вопрос пользователя ИСКЛЮЧИТЕЛЬНО на основе приведенных фрагментов нормативных документов.
+Ваша задача — сформировать точный, строгий, структурированный и аргументированный ответ на вопрос пользователя ИСКЛЮЧИТЕЛЬНО на основе приведенных фрагментов нормативных документов.
 
 ОБЯЗАТЕЛЬНЫЕ ТРЕБОВАНИЯ:
 1. Опирайтесь ИСКЛЮЧИТЕЛЬНО на предоставленный нормативный контекст. Категорически запрещено добавлять внешние данные, домыслы или нерегламентированные сведения.
 2. В ответе ОБЯЗАТЕЛЬНО явно приводите ссылки на первоисточник: название документа, его шифр/код, главу/раздел, пункт (например, п. 4.1.3 или п. 10.6) и номер страницы.
 3. Если приведены термины и сокращения, используйте их официальные формулировки и расшифровки.
-4. Излагайте ответ четко, структурированно, профессиональным деловым языком."""
+4. Излагайте ответ четко, структурированно, профессиональным деловым языком.
+5. Не повторяйте фразы и предложения. Не используйте тавтологий."""
 
 
 def build_offline_fallback_answer(
@@ -66,6 +67,8 @@ class OllamaClient:
         fallback_model: Optional[str] = None,
         temperature: Optional[float] = None,
         timeout: Optional[float] = None,
+        max_tokens: int = 350,
+        frequency_penalty: float = 0.5,
     ):
         raw_url = base_url or settings.OLLAMA_BASE_URL
         # Normalize localhost to 127.0.0.1 to avoid IPv6 resolution latency on Windows
@@ -76,6 +79,8 @@ class OllamaClient:
         self.fallback_model = fallback_model or settings.OLLAMA_FALLBACK_MODEL
         self.temperature = temperature if temperature is not None else settings.LLM_TEMPERATURE
         self.timeout = timeout if timeout is not None else settings.LLM_TIMEOUT_SECONDS
+        self.max_tokens = max_tokens
+        self.frequency_penalty = frequency_penalty
 
     async def is_healthy(self) -> bool:
         """Check if local Ollama server is online and reachable."""
@@ -130,7 +135,8 @@ class OllamaClient:
             "model": model_name,
             "messages": messages,
             "temperature": self.temperature,
-            "max_tokens": 600,
+            "max_tokens": self.max_tokens,
+            "frequency_penalty": self.frequency_penalty,
         }
 
         async with httpx.AsyncClient(timeout=self.timeout, trust_env=False) as client:
@@ -166,18 +172,21 @@ class OllamaClient:
             logger.info(f"Invoking Ollama primary model: {self.model}")
             return await self._call_completion(self.model, messages)
         except httpx.HTTPStatusError as h_err:
-            logger.warning(f"Ollama primary model '{self.model}' HTTP error: {h_err.response.status_code}")
-            # If model not found (404), try fallback model
-            if h_err.response.status_code == 404 and self.fallback_model and self.fallback_model != self.model:
+            logger.warning(
+                f"Ollama primary model '{self.model}' HTTP error {h_err.response.status_code}: {h_err.response.text}"
+            )
+            # If model error (404 or 500), try fallback model
+            if h_err.response.status_code in (404, 500) and self.fallback_model and self.fallback_model != self.model:
                 try:
                     logger.info(f"Retrying with fallback model: {self.fallback_model}")
                     return await self._call_completion(self.fallback_model, messages)
                 except Exception as fb_err:
-                    logger.warning(f"Ollama fallback model failed: {fb_err}")
+                    logger.warning(f"Ollama fallback model failed ({type(fb_err).__name__}): {fb_err}")
             if not allow_fallback:
                 raise
         except Exception as e:
-            logger.warning(f"Ollama unreachable or error: {e}")
+            err_msg = str(e) or f"{type(e).__name__} (timeout or connection failed)"
+            logger.warning(f"Ollama unreachable or error: {err_msg}")
             if not allow_fallback:
                 raise
 

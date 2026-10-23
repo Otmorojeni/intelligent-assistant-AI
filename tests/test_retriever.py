@@ -39,6 +39,9 @@ class TestRetriever(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(extract_clause_identifiers("Раздел 4"), ["4"])
         self.assertIn("9.16.1", extract_clause_identifiers("согласно п. 9.16.1 и п. 2.3"))
         self.assertIn("2.3", extract_clause_identifiers("согласно п. 9.16.1 и п. 2.3"))
+        self.assertEqual(extract_clause_identifiers("пп. 4.1.3, 4.1.4"), ["4.1.3", "4.1.4"])
+        self.assertEqual(extract_clause_identifiers("подпункт 2.5"), ["2.5"])
+        self.assertEqual(extract_clause_identifiers("согласно п. 4.1.3."), ["4.1.3"])
         self.assertEqual(extract_clause_identifiers("просто текст без пунктов"), [])
         self.assertEqual(extract_clause_identifiers(""), [])
 
@@ -51,7 +54,41 @@ class TestRetriever(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(get_allowed_access_levels("dou_specialist"), ["dsp", "public"])
         self.assertEqual(get_allowed_access_levels("security_auditor"), ["dsp", "public"])
-        self.assertEqual(get_allowed_access_levels("admin"), ["dsp", "public"])
+        self.assertEqual(get_allowed_access_levels("admin"), ["confidential", "dsp", "public", "secret"])
+
+    def test_clause_segment_isolation_no_false_positive(self):
+        """Regression test: verify that clause candidate '1' does NOT falsely boost clause '10.6'."""
+        score_10_6 = calculate_relevance_pct(
+            ts_rank_exact=0.0,
+            ts_rank_or=0.0,
+            clause_sim=0.0,
+            content_sim=0.0,
+            chunk_clause="10.6",
+            clause_candidates=["1"],
+            detected_terms=[],
+            chunk_content="Текст документа о других вопросах",
+            doc_code="OD-184",
+            query="п. 1",
+        )
+        # Should NOT get clause boost (must be 0.0)
+        self.assertEqual(score_10_6, 0.0)
+
+    def test_acronym_word_boundary_isolation(self):
+        """Regression test: verify short acronym 'ИС' does not match random words like 'инструкция'."""
+        score_unrelated = calculate_relevance_pct(
+            ts_rank_exact=0.0,
+            ts_rank_or=0.0,
+            clause_sim=0.0,
+            content_sim=0.0,
+            chunk_clause="5.2",
+            clause_candidates=[],
+            detected_terms=[DetectedTermRef(canonical="ИС", expansion="Информационная система", definition=None)],
+            chunk_content="Настоящая инструкция определяет правила делопроизводства.",
+            doc_code="OD-184",
+            query="Что регламентирует ИС?",
+        )
+        # Must be 0.0 because chunk does NOT contain the acronym ИС or the expansion
+        self.assertEqual(score_unrelated, 0.0)
 
     def test_calculate_relevance_pct_bounds_and_ranking(self):
         """Verify relevance score normalization strictly between 0.0% and 100.0%."""
@@ -161,6 +198,15 @@ class TestRetriever(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await retrieve_chunks(session, "   "), [])
             self.assertEqual(await retrieve_chunks(session, "\t\n"), [])
 
+    async def test_template_reg_number_retrieval(self):
+        """Verify that searching for template module reg_number (e.g. 'УТВ-01') retrieves the module chunk."""
+        async with async_session_factory() as session:
+            sources = await retrieve_chunks(session, "УТВ-01", top_k=3)
+            self.assertGreater(len(sources), 0)
+            top_source = sources[0]
+            self.assertEqual(top_source.document_code, "MOD-ORDER-IS")
+            self.assertGreaterEqual(top_source.relevance_pct, 40.0)
+
     async def test_source_ref_structure_compliance(self):
         """Verify that every returned SourceRef adheres to required schema types."""
         async with async_session_factory() as session:
@@ -187,3 +233,4 @@ class TestRetriever(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -28,7 +28,7 @@ ROLE_ACCESS_PERMISSIONS: Dict[str, Set[str]] = {
     "specialist": {"public", "dsp"},
     "security_auditor": {"public", "dsp"},
     "auditor": {"public", "dsp"},
-    "admin": {"public", "dsp"},
+    "admin": {"public", "dsp", "confidential", "secret"},
     "dsp": {"public", "dsp"},
 }
 
@@ -45,16 +45,18 @@ def extract_clause_identifiers(query: str) -> List[str]:
     if not query:
         return []
 
-    # Patterns like "п. 4.1.3", "пункт 10.6", "4.1.3", "раздел 4"
+    # Patterns like "п. 4.1.3", "пп. 4.1.3, 4.1.4", "пункт 10.6", "подпункт 2.3", "4.1.3", "раздел 4"
     candidates = []
     # 1. Multi-level clause numbers (e.g., 4.1.3, 10.16.1, 1.4)
     for m in re.finditer(r"\b(\d+(?:\.\d+)+)\b", query):
-        candidates.append(m.group(1).strip())
+        val = m.group(1).strip().rstrip(".")
+        if val and val not in candidates:
+            candidates.append(val)
 
-    # 2. Specific prefix matches like "п. 4", "пункт 10"
-    for m in re.finditer(r"(?:п\.|пункт|статья|раздел|гл\.|глава)\s*(\d+(?:\.\d+)*)", query, re.I):
-        c = m.group(1).strip()
-        if c not in candidates:
+    # 2. Specific prefix matches like "п. 4", "пп. 4, 5", "пункт 10", "подпункт 2"
+    for m in re.finditer(r"(?:пп\.|п\.|пункт(?:а|ы|ов|у|ом)?|подпункт(?:а|ы|ов|у|ом)?|стать(?:я|и|е|ю)|раздел(?:а|у|ом)?|гл\.|глав(?:а|ы|е|у))\s*(\d+(?:\.\d+)*)", query, re.I):
+        c = m.group(1).strip().rstrip(".")
+        if c and c not in candidates:
             candidates.append(c)
 
     return candidates
@@ -137,17 +139,31 @@ async def detect_query_terms(
     return detected
 
 
-def generate_quote_excerpt(content: str, query: str, max_chars: int = 400) -> str:
+def generate_quote_excerpt(
+    content: str,
+    query: str,
+    detected_terms: Optional[List[DetectedTermRef]] = None,
+    max_chars: int = 400,
+) -> str:
     """Generate concise and informative quote excerpt from chunk content."""
     clean_content = " ".join(content.split())
     if len(clean_content) <= max_chars:
         return clean_content
 
-    # Try to find match index of query keywords
-    words = [w for w in re.findall(r"[а-яА-ЯёЁa-zA-Z0-9]+", query) if len(w) >= 4]
+    # Try to find match index of query keywords or detected terms
+    search_tokens = []
+    if detected_terms:
+        for t in detected_terms:
+            search_tokens.append(t.canonical)
+            if len(t.expansion) < 40:
+                search_tokens.append(t.expansion)
+
+    query_words = [w for w in re.findall(r"[а-яА-ЯёЁa-zA-Z0-9]+", query) if len(w) >= 3]
+    search_tokens.extend(query_words)
+
     best_idx = -1
-    for w in words:
-        idx = clean_content.lower().find(w.lower())
+    for token in search_tokens:
+        idx = clean_content.lower().find(token.lower())
         if idx != -1:
             best_idx = idx
             break
@@ -174,23 +190,39 @@ def calculate_relevance_pct(
     chunk_content: str,
     doc_code: str,
     query: str,
+    chunk_reg_number: Optional[str] = None,
 ) -> float:
     """Calculate normalized relevance percentage between 0.0% and 100.0%."""
     score = 0.0
 
-    # 1. Exact clause number boost
+    # 1. Clause number boost with segment/hierarchy awareness (prevents digit '1' matching '10.6')
     clean_clause = (chunk_clause or "").strip().lower()
+    clean_digits = re.findall(r"\d+", clean_clause)
     is_exact_clause = False
+    is_partial_clause = False
+
     for candidate in clause_candidates:
         c_cand = candidate.strip().lower()
         if clean_clause == c_cand or clean_clause.endswith(f" {c_cand}"):
             is_exact_clause = True
             break
-        if c_cand in clean_clause:
-            score += 30.0
+
+        cand_digits = re.findall(r"\d+", c_cand)
+        if cand_digits and clean_digits:
+            if clean_digits == cand_digits:
+                is_exact_clause = True
+                break
+            # Hierarchical match: candidate is parent section (e.g. cand=["4"], clause=["4", "1", "3"])
+            elif len(cand_digits) < len(clean_digits) and clean_digits[:len(cand_digits)] == cand_digits:
+                is_partial_clause = True
+            # Or candidate is specific subclause and chunk is section header (e.g. cand=["4", "1", "3"], clause=["4", "1"])
+            elif len(cand_digits) > len(clean_digits) and cand_digits[:len(clean_digits)] == clean_digits:
+                is_partial_clause = True
 
     if is_exact_clause:
         score += 65.0
+    elif is_partial_clause:
+        score += 30.0
 
     # 2. Full-text search rank (ts_rank_cd) with query word coverage
     query_words = [w for w in re.findall(r"[а-яА-ЯёЁa-zA-Z0-9]+", query.lower()) if len(w) >= 3]
@@ -214,23 +246,40 @@ def calculate_relevance_pct(
     if clause_sim > 0.15:
         score += min(clause_sim * 40.0, 20.0)
 
-    # 4. Defined corporate terms boosting
+    # 4. Defined corporate terms boosting with word boundary checking
     for term in detected_terms:
-        if term.canonical.lower() in chunk_content.lower():
-            score += 15.0
-            break
-        elif term.expansion.lower() in chunk_content.lower():
+        canonical = term.canonical.strip()
+        # Word boundary pattern to avoid false positives (e.g. 'ИС' in 'инструкция', 'СП' in 'список')
+        if len(canonical) <= 2:
+            pattern = rf"(?<![а-яА-ЯёЁa-zA-Z0-9]){re.escape(canonical)}(?![а-яА-ЯёЁa-zA-Z0-9])"
+            if re.search(pattern, chunk_content):
+                score += 15.0
+                break
+        else:
+            pattern = rf"(?<![а-яА-ЯёЁa-zA-Z0-9]){re.escape(canonical)}(?![а-яА-ЯёЁa-zA-Z0-9])"
+            if re.search(pattern, chunk_content, re.I):
+                score += 15.0
+                break
+
+        if term.expansion and term.expansion.lower() in content_lower:
             score += 10.0
             break
 
     # 5. Direct substring occurrence in content
     query_clean = query.strip().lower()
-    if len(query_clean) >= 4 and query_clean in chunk_content.lower():
+    if len(query_clean) >= 4 and query_clean in content_lower:
         score += 20.0
 
-    # 6. Document code match (e.g., OD-184, УТВ-01, MOD-ORDER-IS)
-    if doc_code.lower() in query_clean:
-        score += 25.0
+    # 6. Document code or template registration number match (e.g., OD-184, УТВ-01, MOD-ORDER-IS)
+    if doc_code and doc_code.lower() == query_clean:
+        score += 65.0
+    elif doc_code and doc_code.lower() in query_clean:
+        score += 35.0
+
+    if chunk_reg_number and chunk_reg_number.lower() == query_clean:
+        score += 65.0
+    elif chunk_reg_number and chunk_reg_number.lower() in query_clean:
+        score += 35.0
 
     # Cap strictly between 0.0 and 100.0, round to 1 decimal
     final_relevance = max(0.0, min(100.0, score))
@@ -242,6 +291,7 @@ async def retrieve_chunks(
     query: str,
     user_role: str = "employee",
     top_k: int = 5,
+    detected_terms: Optional[List[DetectedTermRef]] = None,
 ) -> List[SourceRef]:
     """Execute hybrid retrieval querying PostgreSQL with full-text, trigram similarity, and RBAC."""
     if not query or not query.strip():
@@ -250,12 +300,13 @@ async def retrieve_chunks(
     clean_query = query.strip()
     clause_candidates = extract_clause_identifiers(clean_query)
     allowed_levels = get_allowed_access_levels(user_role)
-    detected_terms = await detect_query_terms(session, clean_query)
+    if detected_terms is None:
+        detected_terms = await detect_query_terms(session, clean_query)
 
     # Construct broad OR query for websearch_to_tsquery
     significant_words = [
         w for w in re.findall(r"[а-яА-ЯёЁa-zA-Z0-9]+", clean_query)
-        if len(w) >= 3
+        if len(w) >= 2
     ]
     or_query = " OR ".join(significant_words) if significant_words else clean_query
 
@@ -299,11 +350,16 @@ async def retrieve_chunks(
               OR c.chapter ILIKE :like_query
               OR d.doc_code ILIKE :like_query
               OR d.title ILIKE :like_query
+              OR c.metadata_json->>'reg_number' ILIKE :like_query
               OR similarity(c.clause, :clean_query) > 0.3
               OR similarity(c.content, :clean_query) > 0.1
           )
-        ORDER BY ts_rank_exact DESC, ts_rank_or DESC, c.page_number ASC
-        LIMIT 30;
+        ORDER BY 
+            (CASE WHEN c.clause = ANY(:clause_candidates) THEN 100.0 ELSE 0.0 END) DESC,
+            ts_rank_exact DESC, 
+            ts_rank_or DESC, 
+            c.page_number ASC
+        LIMIT 50;
     """)
 
     res = await session.execute(
@@ -322,6 +378,10 @@ async def retrieve_chunks(
     candidates: List[SourceRef] = []
 
     for row in rows:
+        reg_num = None
+        if isinstance(row.metadata_json, dict):
+            reg_num = row.metadata_json.get("reg_number")
+
         relevance_pct = calculate_relevance_pct(
             ts_rank_exact=float(row.ts_rank_exact or 0.0),
             ts_rank_or=float(row.ts_rank_or or 0.0),
@@ -333,9 +393,10 @@ async def retrieve_chunks(
             chunk_content=row.content,
             doc_code=row.doc_code,
             query=clean_query,
+            chunk_reg_number=reg_num,
         )
 
-        quote = generate_quote_excerpt(row.content, clean_query)
+        quote = generate_quote_excerpt(row.content, clean_query, detected_terms)
 
         source_ref = SourceRef(
             document_code=row.doc_code,

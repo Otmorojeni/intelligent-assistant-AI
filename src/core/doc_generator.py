@@ -36,6 +36,17 @@ from src.schemas.api_models import (
 logger = logging.getLogger(__name__)
 
 
+def is_truthy(val: Any) -> bool:
+    """Robust boolean parser supporting bool, int, and textual representations."""
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)):
+        return val != 0
+    if isinstance(val, str):
+        return val.strip().lower() in ("true", "1", "yes", "да", "y", "t")
+    return bool(val)
+
+
 def find_template_file(materials_dir: Path, file_name: str) -> Path:
     """Locate template file in materials directory with Unicode NFC normalization support."""
     direct = materials_dir / file_name
@@ -60,7 +71,7 @@ def remove_approval_stamp(doc: Document) -> None:
     # Also clean any top paragraphs before document heading with approval stamp
     for p in list(doc.paragraphs[:5]):
         txt = p.text.strip().upper()
-        if "УТВЕРЖДАЮ" in txt or "УТВЕРЖДЕНО" in txt:
+        if "УТВЕРЖДАЮ" in txt or "УТВЕРЖДЕНО" in txt or "ГРИФ УТВЕРЖДЕНИЯ" in txt:
             p._element.getparent().remove(p._element)
 
 
@@ -75,16 +86,16 @@ def remove_modular_document_label(doc: Document) -> None:
 def remove_notes_and_explanations(doc: Document) -> None:
     """Delete technical notes, explanations, and instructions at the end of the document."""
     in_notes = False
-    for el in list(doc._body._body):
+    for el in list(doc._body._element):
         tag = el.tag.split("}")[-1]
         if tag == "p":
             p_obj = docx.text.paragraph.Paragraph(el, doc)
-            txt = p_obj.text.strip()
+            txt = p_obj.text.strip().lower()
             if (
-                txt.startswith("Примечания")
-                or txt.startswith("Пояснения")
-                or "Примечания по заполнению" in txt
-                or "Пояснения по заполнению" in txt
+                txt.startswith("примечания")
+                or txt.startswith("пояснения")
+                or "примечания по заполнению" in txt
+                or "пояснения по заполнению" in txt
             ):
                 in_notes = True
         elif tag == "sectPr":
@@ -100,20 +111,21 @@ def clean_text_strict(text: str, signatory_name: str = "") -> str:
         return ""
 
     # Preserve service zones marked with 'НЕ УДАЛЯТЬ'
-    if "НЕ УДАЛЯТЬ" in text:
+    if "НЕ УДАЛЯТЬ" in text or "ВИЗУАЛИЗАЦИЯ ЭП" in text:
         return text
 
     res = text
 
     # Signatory substitution
-    if signatory_name and "И. О. Фамилия" in res:
-        res = res.replace("И. О. Фамилия", signatory_name)
+    if signatory_name:
+        res = re.sub(r"И\.\s*О\.\s*Фамилия", signatory_name, res)
 
     # Delete footnote numbers [1], [2], [15], etc.
-    res = re.sub(r"\[\d+\]", "", res)
+    res = re.sub(r"\[\s*\d+(\s*,\s*\d+)*\s*\]", "", res)
 
     # Delete unused underscore lines (____, _____)
     res = re.sub(r"_{2,}", "", res)
+    res = re.sub(r"(?:_\s*){3,}", "", res)
 
     # Delete empty brackets [] or [ ]
     res = re.sub(r"\[\s*\]", "", res)
@@ -123,6 +135,8 @@ def clean_text_strict(text: str, signatory_name: str = "") -> str:
     res = res.replace("разработанного / измененного", "разработанного")
     res = res.replace("процесса / процессов", "процесса")
     res = res.replace("проекту / проектам", "проекту")
+    res = res.replace("проекта / проектов", "проекта")
+    res = res.replace("реализуемого(ых)", "реализуемого")
 
     # Clean whitespace and punctuation spaces
     res = re.sub(r"[ \t]+", " ", res)
@@ -138,6 +152,10 @@ def clean_empty_paragraphs(doc: Document) -> None:
     # Strip leading empty paragraphs
     while doc.paragraphs and not doc.paragraphs[0].text.strip():
         doc.paragraphs[0]._element.getparent().remove(doc.paragraphs[0]._element)
+
+    # Strip trailing empty paragraphs
+    while doc.paragraphs and not doc.paragraphs[-1].text.strip():
+        doc.paragraphs[-1]._element.getparent().remove(doc.paragraphs[-1]._element)
 
     # Remove consecutive empty paragraphs
     prev_empty = False
@@ -166,7 +184,7 @@ def substitute_template_fields(
         commissioning_date = fields.get("commissioning_date", datetime.now().strftime("%d.%m.%Y"))
         responsible_dept = fields.get("responsible_dept", executor_department or "Департамент информационных технологий")
         infosec_dept = fields.get("infosec_dept", "Департамент информационной безопасности")
-        control_officer = fields.get("control_officer", "директора Департамента информационных технологий")
+        control_officer = fields.get("control_officer", "директор Департамента информационных технологий")
 
         for p in doc.paragraphs:
             txt = p.text
@@ -200,7 +218,10 @@ def substitute_template_fields(
                 p.alignment = align
             elif "4. Ответственным за исполнение настоящего приказа" in txt:
                 align = p.alignment
-                p.text = f"4. Ответственным за исполнение настоящего приказа является {control_officer}."
+                if "оставляю за собой" in control_officer.lower() or control_officer.lower().startswith("контроль"):
+                    p.text = "4. Контроль за исполнением настоящего приказа оставляю за собой."
+                else:
+                    p.text = f"4. Ответственным за исполнение настоящего приказа является {control_officer}."
                 p.alignment = align
             elif txt.strip().startswith("2.") and "____" in txt:
                 align = p.alignment
@@ -237,8 +258,13 @@ def substitute_template_fields(
                 else:
                     p._element.getparent().remove(p._element)
             elif "Контроль за исполнением настоящего приказа" in txt:
+                repeal = fields.get("repeal_order", "")
+                num = "6" if repeal else "5"
                 align = p.alignment
-                p.text = f"5. Контроль за исполнением настоящего приказа возложить на {control}."
+                if "оставляю за собой" in control.lower() or control.lower().startswith("контроль"):
+                    p.text = f"{num}. Контроль за исполнением настоящего приказа оставляю за собой."
+                else:
+                    p.text = f"{num}. Контроль за исполнением настоящего приказа возложить на {control}."
                 p.alignment = align
 
         # Fill Table 2 (appointed staff)
@@ -259,7 +285,7 @@ def substitute_template_fields(
         transferee = fields.get("transferee_name", "принимающее лицо")
         basis = fields.get("transfer_basis", "кадровыми изменениями")
         deadline = fields.get("deadline", datetime.now().strftime("%d.%m.%Y"))
-        commission = fields.get("commission_members", "представителя Организации")
+        commission = fields.get("commission_members", "главного специалиста аппарата")
         control = fields.get("control_officer", "руководителя аппарата")
 
         for p in doc.paragraphs:
@@ -279,11 +305,17 @@ def substitute_template_fields(
                 p.alignment = align
             elif "2. Назначить" in txt and "представителем" in txt:
                 align = p.alignment
-                p.text = f"2. Назначить {commission} представителем Организации при приеме и передаче дел и имущества."
+                if "представител" in commission.lower():
+                    p.text = f"2. Назначить {commission} при приеме и передаче дел и имущества."
+                else:
+                    p.text = f"2. Назначить {commission} представителем Организации при приеме и передаче дел и имущества."
                 p.alignment = align
             elif "3. Контроль за исполнением настоящего приказа" in txt:
                 align = p.alignment
-                p.text = f"3. Контроль за исполнением настоящего приказа возложить на {control}."
+                if "оставляю за собой" in control.lower() or control.lower().startswith("контроль"):
+                    p.text = "3. Контроль за исполнением настоящего приказа оставляю за собой."
+                else:
+                    p.text = f"3. Контроль за исполнением настоящего приказа возложить на {control}."
                 p.alignment = align
 
     elif code == "MOD-ORDER-LNA":
@@ -331,7 +363,10 @@ def substitute_template_fields(
             elif "Контроль за исполнением настоящего приказа" in txt:
                 num = "5" if repeal_act else "4"
                 align = p.alignment
-                p.text = f"{num}. Контроль за исполнением настоящего приказа возложить на {control}."
+                if "оставляю за собой" in control.lower() or control.lower().startswith("контроль"):
+                    p.text = f"{num}. Контроль за исполнением настоящего приказа оставляю за собой."
+                else:
+                    p.text = f"{num}. Контроль за исполнением настоящего приказа возложить на {control}."
                 p.alignment = align
 
     elif code == "MOD-DISP-AUDIT":
@@ -372,7 +407,10 @@ def substitute_template_fields(
                 p.alignment = align
             elif "7. Контроль за исполнением настоящего распоряжения" in txt:
                 align = p.alignment
-                p.text = f"7. Контроль за исполнением настоящего распоряжения возложить на {control}."
+                if "оставляю за собой" in control.lower() or control.lower().startswith("контроль"):
+                    p.text = "7. Контроль за исполнением настоящего распоряжения оставляю за собой."
+                else:
+                    p.text = f"7. Контроль за исполнением настоящего распоряжения возложить на {control}."
                 p.alignment = align
 
         # Fill Table 2 (audit team)
@@ -422,7 +460,10 @@ def substitute_template_fields(
             elif "Контроль за исполнением настоящего распоряжения" in txt:
                 num = "3" if repeal else "2"
                 align = p.alignment
-                p.text = f"{num}. Контроль за исполнением настоящего распоряжения возложить на {control}."
+                if "оставляю за собой" in control.lower() or control.lower().startswith("контроль"):
+                    p.text = f"{num}. Контроль за исполнением настоящего распоряжения оставляю за собой."
+                else:
+                    p.text = f"{num}. Контроль за исполнением настоящего распоряжения возложить на {control}."
                 p.alignment = align
 
         # Fill Table 2 (committee members)
@@ -478,7 +519,10 @@ def substitute_template_fields(
                 p.alignment = align
             elif "6. Контроль за исполнением настоящего распоряжения" in txt:
                 align = p.alignment
-                p.text = f"6. Контроль за исполнением настоящего распоряжения возложить на {control}."
+                if "оставляю за собой" in control.lower() or control.lower().startswith("контроль"):
+                    p.text = "6. Контроль за исполнением настоящего распоряжения оставляю за собой."
+                else:
+                    p.text = f"6. Контроль за исполнением настоящего распоряжения возложить на {control}."
                 p.alignment = align
 
         # Fill Table 2 (roles)
@@ -610,7 +654,7 @@ async def get_all_projects(session: AsyncSession) -> List[ProjectCardItem]:
         .order_by(desc(ProjectCard.created_at))
     )
 
-    cards = res.scalars().all()
+    cards = res.scalars().unique().all()
     items: List[ProjectCardItem] = []
     for c in cards:
         items.append(
@@ -677,12 +721,12 @@ async def generate_document(
     )
 
     # 5. Calculate sequential approval route via approval_router.py
-    infosec_access = bool(request.fields.get("affects_is_access", False)) or (template.module_code == "MOD-ORDER-IS")
-    it_involved = bool(request.fields.get("is_it_project", False)) or (template.module_code == "MOD-ORDER-IS")
-    regional_involved = bool(request.fields.get("involves_regional", False))
+    infosec_access = is_truthy(request.fields.get("affects_is_access", False)) or (template.module_code == "MOD-ORDER-IS")
+    it_involved = is_truthy(request.fields.get("is_it_project", False)) or (template.module_code == "MOD-ORDER-IS")
+    regional_involved = is_truthy(request.fields.get("involves_regional", False))
 
     calc_req = ApprovalCalculateRequest(
-        doc_type=template.title,
+        doc_type=f"{template.module_code} {template.title}",
         uses_module=True,
         involves_infosec_access=infosec_access,
         involves_it=it_involved,
@@ -711,6 +755,8 @@ async def generate_document(
         project_title = f"{template.title} по {request.fields['workgroup_subject']}"
     elif "audit_process" in request.fields:
         project_title = f"{template.title} процесса {request.fields['audit_process']}"
+    elif "department_name" in request.fields:
+        project_title = f"{template.title} подразделения {request.fields['department_name']}"
     else:
         project_title = template.title
 

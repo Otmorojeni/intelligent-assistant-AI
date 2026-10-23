@@ -363,6 +363,101 @@ class TestDocGenerator(unittest.IsolatedAsyncioTestCase):
             found = any(p["id"] == gen_data["project_id"] for p in projects_data)
             self.assertTrue(found, "Newly generated project card must appear in /v1/documents/projects")
 
+    async def test_control_officer_default_phrase_handling(self):
+        """Verify that default control phrase does not produce 'возложить на Контроль...'."""
+        async with async_session_factory() as session:
+            req = DocumentGenerateRequest(
+                module_code="MOD-DISP-PROJECT",
+                executor_name="Тестов Т.Т.",
+                executor_department="Проектный департамент",
+                signatory_name="Руководитель Р.Р.",
+                access_level="public",
+                fields={
+                    "project_name": "Проект Ревизия",
+                    "control_officer": "Контроль за исполнением настоящего распоряжения оставляю за собой",
+                    "is_it_project": False,
+                },
+                user_role="employee",
+            )
+            resp = await generate_document(session, req)
+            doc_path = settings.GENERATED_DOCS_DIR / resp.file_name
+            doc = docx.Document(str(doc_path))
+            all_text = " \n ".join(p.text for p in doc.paragraphs if p.text.strip())
+
+            self.assertNotIn(
+                "возложить на Контроль",
+                all_text,
+                "Must not create redundant 'возложить на Контроль...'",
+            )
+            self.assertIn(
+                "Контроль за исполнением настоящего распоряжения оставляю за собой",
+                all_text,
+            )
+
+    async def test_disp_project_it_conditional_routing(self):
+        """Verify project committee without IT matches Rule 7 (no IT dept) and with IT matches Rule 8."""
+        async with async_session_factory() as session:
+            # 1. Non-IT committee (is_it_project=False) -> Rule 7
+            req_no_it = DocumentGenerateRequest(
+                module_code="MOD-DISP-PROJECT",
+                executor_name="Иванов И.И.",
+                executor_department="Финансовый департамент",
+                signatory_name="Петров П.П.",
+                fields={"project_name": "Бюджетный комитет", "is_it_project": False},
+            )
+            resp_no_it = await generate_document(session, req_no_it)
+            depts_no_it = [s.department.lower() for s in resp_no_it.approval_route]
+            self.assertFalse(
+                any("информационных технологий" in d for d in depts_no_it),
+                "Non-IT committee must NOT include IT Department in approval route",
+            )
+
+            # 2. IT committee (is_it_project=True) -> Rule 8
+            req_it = DocumentGenerateRequest(
+                module_code="MOD-DISP-PROJECT",
+                executor_name="Иванов И.И.",
+                executor_department="Департамент ИТ",
+                signatory_name="Петров П.П.",
+                fields={"project_name": "Комитет АСУ", "is_it_project": True},
+            )
+            resp_it = await generate_document(session, req_it)
+            depts_it = [s.department.lower() for s in resp_it.approval_route]
+            self.assertTrue(
+                any("информационных технологий" in d for d in depts_it),
+                "IT committee MUST include IT Department in approval route",
+            )
+
+    async def test_order_dou_paragraph_numbering_with_and_without_repeal(self):
+        """Verify paragraph numbering in MOD-ORDER-DOU: repeal is 5, control is 6; without repeal, control is 5."""
+        async with async_session_factory() as session:
+            # With repeal
+            req_rep = DocumentGenerateRequest(
+                module_code="MOD-ORDER-DOU",
+                executor_name="Иванов И.И.",
+                executor_department="Департамент ДОУ",
+                signatory_name="Петров П.П.",
+                fields={"repeal_order": "от 10.01.2024 № ОД-1"},
+            )
+            resp_rep = await generate_document(session, req_rep)
+            doc_rep = docx.Document(str(settings.GENERATED_DOCS_DIR / resp_rep.file_name))
+            rep_texts = [p.text for p in doc_rep.paragraphs if p.text.strip()]
+            self.assertTrue(any(t.startswith("5. Признать утратившим силу") for t in rep_texts))
+            self.assertTrue(any(t.startswith("6. Контроль за исполнением") for t in rep_texts))
+
+            # Without repeal
+            req_norep = DocumentGenerateRequest(
+                module_code="MOD-ORDER-DOU",
+                executor_name="Иванов И.И.",
+                executor_department="Департамент ДОУ",
+                signatory_name="Петров П.П.",
+                fields={},
+            )
+            resp_norep = await generate_document(session, req_norep)
+            doc_norep = docx.Document(str(settings.GENERATED_DOCS_DIR / resp_norep.file_name))
+            norep_texts = [p.text for p in doc_norep.paragraphs if p.text.strip()]
+            self.assertFalse(any("Признать утратившим силу" in t for t in norep_texts))
+            self.assertTrue(any(t.startswith("5. Контроль за исполнением") for t in norep_texts))
+
 
 if __name__ == "__main__":
     unittest.main()

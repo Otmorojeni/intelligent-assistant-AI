@@ -383,7 +383,17 @@ def resolve_matching_rule(
         rule = rules_by_number.get(9) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[8])
         return rule, notes, True
 
-    if any(code in clean_doc for code in ("mod-disp-project", "утв-06", "mod-disp-workgroup", "утв-07")):
+    if any(
+        code in clean_doc
+        for code in (
+            "mod-disp-project",
+            "утв-06",
+            "mod-disp-workgroup",
+            "утв-07",
+            "создании проектного комитета",
+            "создании рабочей группы",
+        )
+    ):
         if request.involves_it:
             rule = rules_by_number.get(8) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[7])
             notes.append("Временное объединение создается для реализации ИТ-проекта или решения вопросов ИС: включено согласование с Департаментом информационных технологий (Правило 8).")
@@ -482,9 +492,7 @@ def resolve_matching_rule(
             request.involves_it
             or (
                 (
-                    "ит" in clean_doc
-                    or "it" in clean_doc
-                    or bool(re.search(r"\b(ит|it|ис|is)\b", clean_doc))
+                    bool(re.search(r"\b(ит|it|ис|is)\b", clean_doc))
                     or "информационн" in clean_doc
                     or "цифровизац" in clean_doc
                     or "программн" in clean_doc

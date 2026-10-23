@@ -130,6 +130,7 @@ class DocumentGenerateRequest(BaseModel):
     access_level: str = "public"
     fields: Dict[str, Any]
     user_role: str = "employee"
+    project_title: Optional[str] = None
 
 
 class DocumentGenerateResponse(BaseModel):
@@ -140,3 +141,23 @@ class DocumentGenerateResponse(BaseModel):
     note_text: str
     approval_route: List[ApprovalStage]
     created_at: datetime
+
+
+class ProjectCardItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    template_id: str
+    module_code: Optional[str] = None
+    project_title: str
+    executor_name: str
+    executor_department: str
+    signatory_name: str
+    access_level: str
+    note_text: str
+    filled_fields: Dict[str, Any]
+    approval_route: List[ApprovalStage]
+    generated_file_name: str
+    download_url: str
+    status: str
+    created_at: datetime
+

@@ -15,6 +15,7 @@ from src.schemas.api_models import (
     DocumentGenerateRequest,
     DocumentGenerateResponse,
     TemplateModuleInfo,
+    ProjectCardItem,
 )
 
 __all__ = [
@@ -31,4 +32,6 @@ __all__ = [
     "DocumentGenerateRequest",
     "DocumentGenerateResponse",
     "TemplateModuleInfo",
+    "ProjectCardItem",
 ]
+

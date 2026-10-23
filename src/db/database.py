@@ -1,8 +1,19 @@
+import asyncio
 import logging
+import sys
+import warnings
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy import text
 from src.config import settings
+
+if sys.platform == "win32":
+    warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*WindowsSelectorEventLoopPolicy.*")
+    warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*set_event_loop_policy.*")
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    except Exception:
+        pass
 
 logger = logging.getLogger(__name__)
 

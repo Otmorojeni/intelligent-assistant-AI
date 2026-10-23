@@ -67,6 +67,9 @@ class QueryResponse(BaseModel):
     approval_recommendation: Optional[ApprovalRecommendation] = None
     zero_hallucination_triggered: bool = False
     latency_ms: float
+    t_match_ms: float = 0.0
+    t_retriever_ms: float = 0.0
+    t_llm_ms: float = 0.0
 
 
 class ApprovalCalculateRequest(BaseModel):

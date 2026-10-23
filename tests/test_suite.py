@@ -20,6 +20,8 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 # Import the authoritative test cases
 from tests.test_extractor import TestExtractorUnit
 from tests.test_indexer_integration import TestIndexerIntegration
+from tests.test_pipeline import TestPipeline
+from tests.test_retriever import TestRetriever
 
 
 def suite() -> unittest.TestSuite:
@@ -28,6 +30,8 @@ def suite() -> unittest.TestSuite:
     loader = unittest.TestLoader()
     s.addTests(loader.loadTestsFromTestCase(TestExtractorUnit))
     s.addTests(loader.loadTestsFromTestCase(TestIndexerIntegration))
+    s.addTests(loader.loadTestsFromTestCase(TestRetriever))
+    s.addTests(loader.loadTestsFromTestCase(TestPipeline))
     return s
 
 

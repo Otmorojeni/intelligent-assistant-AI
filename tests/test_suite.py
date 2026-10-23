@@ -24,6 +24,7 @@ from tests.test_extractor import TestExtractorUnit
 from tests.test_indexer_integration import TestIndexerIntegration
 from tests.test_pipeline import TestPipeline
 from tests.test_retriever import TestRetriever
+from tests.test_security_versioning import TestSecurityVersioning
 
 
 def suite() -> unittest.TestSuite:
@@ -36,6 +37,7 @@ def suite() -> unittest.TestSuite:
     s.addTests(loader.loadTestsFromTestCase(TestPipeline))
     s.addTests(loader.loadTestsFromTestCase(TestApprovalRouter))
     s.addTests(loader.loadTestsFromTestCase(TestDocGenerator))
+    s.addTests(loader.loadTestsFromTestCase(TestSecurityVersioning))
     return s
 
 

@@ -400,3 +400,24 @@ async def lookup_defined_term(
         }
 
     return None
+
+
+# Re-export versioning lifecycle functions
+from src.core.versioning import (
+    upload_document_version,
+    activate_document_version,
+    get_all_document_versions,
+)
+
+__all__ = [
+    "clear_database",
+    "save_extracted_document",
+    "save_defined_terms",
+    "save_approval_rules",
+    "save_template_modules",
+    "seed_database",
+    "get_term_definition",
+    "upload_document_version",
+    "activate_document_version",
+    "get_all_document_versions",
+]

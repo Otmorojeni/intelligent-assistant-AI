@@ -2,12 +2,13 @@
 
 import logging
 from pathlib import Path
-from typing import List
+from typing import List, Optional
+import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
 import httpx
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
@@ -22,18 +23,40 @@ from src.core.doc_generator import (
     get_template_by_code,
 )
 from src.core.pipeline import process_query
+from src.core.security import (
+    UserContext,
+    UserRole,
+    check_document_access,
+    create_access_token,
+    detect_prompt_injection,
+    get_current_user,
+    log_audit_event,
+    normalize_role,
+    require_role,
+)
+from src.core.versioning import (
+    activate_document_version,
+    get_all_document_versions,
+    query_audit_logs,
+    upload_document_version,
+)
 from src.db.database import get_db
+from src.db.models import DocumentChunk
 from src.schemas.api_models import (
     ApprovalCalculateRequest,
     ApprovalCalculateResponse,
     ApprovalRuleItem,
+    AuditLogItem,
     DocumentGenerateRequest,
     DocumentGenerateResponse,
+    DocumentVersionItem,
     HealthResponse,
     ProjectCardItem,
     QueryRequest,
     QueryResponse,
     TemplateModuleInfo,
+    TokenRequest,
+    TokenResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,6 +95,13 @@ async def get_approval_rules(
 
 
 @router.post(
+    "/assistant/query",
+    response_model=QueryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Ask questions to the regulatory knowledge base (assistant)",
+    description="Orchestration pipeline with hybrid retrieval, RBAC access-level filtering, and audit logging.",
+)
+@router.post(
     "/query",
     response_model=QueryResponse,
     status_code=status.HTTP_200_OK,
@@ -81,10 +111,57 @@ async def get_approval_rules(
 async def handle_query(
     request: QueryRequest,
     raw_request: Request,
+    current_user: UserContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> QueryResponse:
-    """Handle natural language question answering with approval recommendation."""
+    """Handle natural language question answering with approval recommendation, RBAC, and prompt injection guard."""
     client_ip = raw_request.client.host if raw_request.client else None
+
+    # Determine effective role: X-User-Role / Bearer header takes precedence if provided; otherwise request body
+    header_role = raw_request.headers.get("X-User-Role")
+    if header_role:
+        effective_role = normalize_role(header_role)
+    elif current_user.role != UserRole.EMPLOYEE.value:
+        effective_role = current_user.role
+    elif request.user_role:
+        effective_role = normalize_role(request.user_role)
+    else:
+        effective_role = UserRole.EMPLOYEE.value
+
+    request.user_role = effective_role
+
+    # Guard against Prompt Injection / Malicious inputs
+    is_malicious, reason = detect_prompt_injection(request.query)
+    if is_malicious:
+        refusal_msg = (
+            "Запрос содержит потенциально небезопасные инструкции (Prompt Injection). "
+            "В обработке отказано в соответствии с политикой информационной безопасности."
+        )
+        logger.warning(f"Prompt injection blocked from {client_ip} (role={effective_role}): {reason}")
+        await log_audit_event(
+            session=session,
+            user_role=effective_role,
+            user_name=current_user.username,
+            action_type="security_alert",
+            query_text=request.query,
+            response_summary=f"Prompt injection blocked: {reason}",
+            status="prompt_injection_blocked",
+            latency_ms=0.0,
+            ip_address=client_ip,
+        )
+        await session.commit()
+
+        return QueryResponse(
+            request_id=request.request_id or str(uuid.uuid4()),
+            answer=refusal_msg,
+            relevance_score=0.0,
+            detected_terms=[],
+            sources=[],
+            approval_recommendation=None,
+            zero_hallucination_triggered=True,
+            latency_ms=0.0,
+        )
+
     return await process_query(session=session, request=request, ip_address=client_ip)
 
 
@@ -212,4 +289,207 @@ async def list_projects(
 ) -> List[ProjectCardItem]:
     """Retrieve list of all created project cards from database."""
     return await get_all_projects(session)
+
+
+# =============================================================================
+# Document Hot-Reload Versioning & Lifecycle Endpoints (Section 6)
+# =============================================================================
+
+
+@router.post(
+    "/documents/upload-version",
+    response_model=DocumentVersionItem,
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload new regulatory document edition (PDF or DOCX)",
+    description=(
+        "Requires dou_specialist or admin role. Archives previous versions, parses chunks on the fly, "
+        "and indexes them in PostgreSQL without requiring server restart."
+    ),
+)
+async def upload_version(
+    raw_request: Request,
+    file: UploadFile = File(..., description="PDF or DOCX regulatory document file"),
+    doc_code: str = Form(..., description="Document identifier code, e.g. OD-184"),
+    title: str = Form(..., description="Full regulatory document title"),
+    version: str = Form(..., description="Version identifier, e.g. 2.0"),
+    doc_type: str = Form("instruction", description="Document type: instruction, guideline, matrix, template"),
+    access_level: str = Form("public", description="Access level: public, dsp, confidential, secret"),
+    current_user: UserContext = Depends(require_role(["dou_specialist", "admin"])),
+    session: AsyncSession = Depends(get_db),
+) -> DocumentVersionItem:
+    """Upload and hot-reload a new version of a regulatory document."""
+    client_ip = raw_request.client.host if raw_request.client else None
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty.",
+        )
+
+    clean_access = access_level.strip().lower()
+    if clean_access not in ["public", "dsp", "confidential", "secret"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid access_level '{access_level}'. Allowed: public, dsp, confidential, secret.",
+        )
+
+    db_doc = await upload_document_version(
+        session=session,
+        file_bytes=file_bytes,
+        file_name=file.filename or f"{doc_code}.pdf",
+        doc_code=doc_code.strip(),
+        title=title.strip(),
+        version=version.strip(),
+        doc_type=doc_type.strip(),
+        access_level=clean_access,
+    )
+
+    await log_audit_event(
+        session=session,
+        user_role=current_user.role,
+        user_name=current_user.username,
+        action_type="upload_version",
+        query_text=f"Uploaded {doc_code} v{version} ({file.filename})",
+        response_summary=f"Successfully indexed version {version} with access={clean_access}",
+        status="success",
+        latency_ms=0.0,
+        ip_address=client_ip,
+    )
+    await session.commit()
+
+    chunk_count_stmt = select(func.count(DocumentChunk.id)).where(DocumentChunk.document_id == db_doc.id)
+    chunk_count = (await session.execute(chunk_count_stmt)).scalar() or 0
+
+    return DocumentVersionItem(
+        id=str(db_doc.id),
+        doc_code=db_doc.doc_code,
+        title=db_doc.title,
+        doc_type=db_doc.doc_type,
+        version=db_doc.version,
+        access_level=db_doc.access_level,
+        is_active=db_doc.is_active,
+        file_name=db_doc.file_name,
+        file_size=db_doc.file_size,
+        sha256=db_doc.sha256,
+        chunk_count=int(chunk_count),
+        created_at=db_doc.created_at,
+        updated_at=db_doc.updated_at,
+    )
+
+
+@router.get(
+    "/documents/versions",
+    response_model=List[DocumentVersionItem],
+    status_code=status.HTTP_200_OK,
+    summary="List all registered documents and their versions",
+    description="Returns all registered documents and their editions with chunk counts, active status, and access levels.",
+)
+async def list_document_versions(
+    session: AsyncSession = Depends(get_db),
+) -> List[DocumentVersionItem]:
+    """Return all document versions with chunk counts and active statuses."""
+    return await get_all_document_versions(session)
+
+
+@router.post(
+    "/documents/{doc_code}/activate-version/{version}",
+    response_model=DocumentVersionItem,
+    status_code=status.HTTP_200_OK,
+    summary="Activate document version (hot-reload switch or rollback)",
+    description="Sets selected version to is_active=True and all other versions to is_active=False. Requires dou_specialist or admin.",
+)
+async def switch_document_version(
+    doc_code: str,
+    version: str,
+    raw_request: Request,
+    current_user: UserContext = Depends(require_role(["dou_specialist", "admin"])),
+    session: AsyncSession = Depends(get_db),
+) -> DocumentVersionItem:
+    """Activate specified version for a regulatory document, archiving all other versions."""
+    client_ip = raw_request.client.host if raw_request.client else None
+    target_doc = await activate_document_version(session, doc_code.strip(), version.strip())
+
+    await log_audit_event(
+        session=session,
+        user_role=current_user.role,
+        user_name=current_user.username,
+        action_type="activate_version",
+        query_text=f"Activated {doc_code} v{version}",
+        response_summary=f"Switched active edition of {doc_code} to v{version}",
+        status="success",
+        latency_ms=0.0,
+        ip_address=client_ip,
+    )
+    await session.commit()
+
+    chunk_count_stmt = select(func.count(DocumentChunk.id)).where(DocumentChunk.document_id == target_doc.id)
+    chunk_count = (await session.execute(chunk_count_stmt)).scalar() or 0
+
+    return DocumentVersionItem(
+        id=str(target_doc.id),
+        doc_code=target_doc.doc_code,
+        title=target_doc.title,
+        doc_type=target_doc.doc_type,
+        version=target_doc.version,
+        access_level=target_doc.access_level,
+        is_active=target_doc.is_active,
+        file_name=target_doc.file_name,
+        file_size=target_doc.file_size,
+        sha256=target_doc.sha256,
+        chunk_count=int(chunk_count),
+        created_at=target_doc.created_at,
+        updated_at=target_doc.updated_at,
+    )
+
+
+# =============================================================================
+# Security Audit Trail & Authentication Endpoints (Section 6)
+# =============================================================================
+
+
+@router.get(
+    "/audit/logs",
+    response_model=List[AuditLogItem],
+    status_code=status.HTTP_200_OK,
+    summary="Retrieve security and operational audit trail records",
+    description="Requires security_auditor or admin role. Filter by action_type, user_role, status.",
+)
+async def get_audit_trail(
+    action_type: Optional[str] = None,
+    user_role: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    current_user: UserContext = Depends(require_role(["security_auditor", "admin"])),
+    session: AsyncSession = Depends(get_db),
+) -> List[AuditLogItem]:
+    """Retrieve filtered audit records from PostgreSQL audit_logs table."""
+    return await query_audit_logs(
+        session=session,
+        action_type=action_type,
+        user_role=user_role,
+        status_filter=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post(
+    "/auth/token",
+    response_model=TokenResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Issue JWT access token for user identity and role",
+)
+async def generate_token(
+    request: TokenRequest,
+) -> TokenResponse:
+    """Generate signed JWT token containing subject and RBAC role."""
+    norm_role = normalize_role(request.role)
+    token = create_access_token({"sub": request.username, "role": norm_role})
+    return TokenResponse(
+        access_token=token,
+        token_type="bearer",
+        role=norm_role,
+        username=request.username,
+    )
 

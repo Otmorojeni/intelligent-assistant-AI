@@ -104,33 +104,7 @@ async def match_approval_recommendation(
     return match_approval_from_query(rules, query)
 
 
-async def log_audit_event(
-    session: AsyncSession,
-    user_role: str,
-    query_text: str,
-    response_summary: str,
-    status: str,
-    latency_ms: float,
-    ip_address: Optional[str] = None,
-) -> None:
-    """Save query event into audit_logs table."""
-    try:
-        audit = AuditLog(
-            id=uuid.uuid4(),
-            timestamp=datetime.now(timezone.utc),
-            user_role=user_role,
-            user_name="Пользователь",
-            action_type="query",
-            query_text=query_text,
-            response_summary=response_summary[:500] if response_summary else None,
-            status=status,
-            latency_ms=latency_ms,
-            ip_address=ip_address,
-        )
-        session.add(audit)
-        await session.flush()
-    except Exception as e:
-        logger.warning(f"Failed to record audit log: {e}")
+from src.core.security import log_audit_event
 
 
 async def process_query(

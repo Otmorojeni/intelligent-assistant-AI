@@ -161,3 +161,48 @@ class ProjectCardItem(BaseModel):
     status: str
     created_at: datetime
 
+
+class DocumentVersionItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    doc_code: str
+    title: str
+    doc_type: str
+    version: str
+    access_level: str
+    is_active: bool
+    file_name: str
+    file_size: int
+    sha256: Optional[str] = None
+    chunk_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class AuditLogItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    timestamp: datetime
+    user_role: str
+    user_name: str
+    action_type: str
+    query_text: Optional[str] = None
+    response_summary: Optional[str] = None
+    status: str
+    latency_ms: float
+    ip_address: Optional[str] = None
+
+
+class TokenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    username: str = "Пользователь"
+    role: str = "employee"
+
+
+class TokenResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    access_token: str
+    token_type: str = "bearer"
+    role: str
+    username: str
+

@@ -221,9 +221,16 @@ def extract_pdf_instruction(pdf_path: Path) -> ExtractedDocument:
                 continue
 
             # Detect Clause Header: "X.Y" or "X.Y.Z"
+            m_range_ref = re.match(r"^(\d+\.\d+(?:\.\d+)?)\s*[–\-—]\s*\d+", line)
             m_cl = re.match(r"^(\d+\.\d+(?:\.\d+)?)\.?\s*(.*)", line)
             is_new_clause = False
-            if m_cl:
+            is_range_continuation = False
+            if m_range_ref:
+                cl_major = int(m_range_ref.group(1).split(".")[0])
+                if cl_major == current_chapter_num:
+                    is_new_clause = True
+                    is_range_continuation = True
+            elif m_cl:
                 cl_major = int(m_cl.group(1).split(".")[0])
                 # Ensure clause major matches current chapter to prevent mid-sentence wrapping errors
                 if cl_major == current_chapter_num:
@@ -232,7 +239,10 @@ def extract_pdf_instruction(pdf_path: Path) -> ExtractedDocument:
             if is_new_clause:
                 assert m_cl is not None
                 if current_lines:
-                    content_str = "\n".join(current_lines).strip()
+                    # If wrapped line is a mid-sentence range cross-reference (e.g. "4.5.1–4.5.3"),
+                    # include the continuation in the parent clause content so parent clause is complete
+                    full_lines = current_lines + ([line] if is_range_continuation else [])
+                    content_str = "\n".join(full_lines).strip()
                     if content_str:
                         chunks.append(
                             ExtractedChunk(
@@ -248,7 +258,11 @@ def extract_pdf_instruction(pdf_path: Path) -> ExtractedDocument:
                                 },
                             )
                         )
-                current_clause = m_cl.group(1)
+                current_clause = (
+                    f"{current_clause} (прим.)"
+                    if is_range_continuation
+                    else m_cl.group(1)
+                )
                 current_clause_page = page_num
                 current_lines = [line]
             else:
@@ -436,11 +450,11 @@ def extract_defined_terms(pdf_doc: ExtractedDocument) -> List[DefinedTermDTO]:
             page_number=2,
         ),
         DefinedTermDTO(
-            canonical="Заместители Председателя Организации",
-            expansion="Заместители Председателя Организации",
-            definition="Должностные лица, замещающие должности заместителей Председателя Организации и осуществляющие полномочия в соответствии с распределением обязанностей.",
-            clause="1.4",
-            page_number=2,
+            canonical="МЭДО",
+            expansion="Система межведомственного электронного документооборота",
+            definition="Федеральная информационная система межведомственного электронного документооборота, используемая для обмена электронными документами с органами государственной власти и внешними абонентами (пп. 3.1.1, 4.1.2 Инструкции).",
+            clause="3.1.1, 4.1.2",
+            page_number=8,
         ),
         DefinedTermDTO(
             canonical="Подразделения ДОУ",
@@ -457,11 +471,11 @@ def extract_defined_terms(pdf_doc: ExtractedDocument) -> List[DefinedTermDTO]:
             page_number=3,
         ),
         DefinedTermDTO(
-            canonical="Подразделения Организации",
-            expansion="Подразделения Организации",
-            definition="СП ЦА, РО Организации и СП РО.",
-            clause="1.4",
-            page_number=3,
+            canonical="ИОД",
+            expansion="Информационно-обзорный документ",
+            definition="Аналитический, справочный или обзорный документ (справка, обзор, дайджест, заключение), подготавливаемый подразделениями Организации в информационно-справочных целях (п. 2.11 Инструкции).",
+            clause="2.11",
+            page_number=7,
         ),
         DefinedTermDTO(
             canonical="Метаданные",
@@ -903,6 +917,57 @@ def extract_approval_matrix_data(
         ),
     ]
 
+    # Dynamically inspect doc.tables for any custom/updated matrix rows not covered by baseline rules
+    known_prefixes = (
+        "вид документа",
+        "проект документа",
+        "внутренние документы",
+        "внешние документы",
+        "приказы о работе в выходные",
+        "приказы о приеме и передаче",
+        "приказы по вопросам информационных",
+        "прочие приказы",
+        "распоряжения о предоставлении материальной",
+        "распоряжения о создании рабочих групп",
+        "прочие распоряжения",
+        "письма за подписью руководства",
+        "письма российским юридическим лицам",
+    )
+    next_rule_num = len(rules) + 1
+    for tbl in doc.tables:
+        for row_idx, row in enumerate(tbl.rows):
+            if not row.cells:
+                continue
+            cell0 = row.cells[0].text.strip()
+            if not cell0 or len(cell0) < 4:
+                continue
+            cell0_low = cell0.lower()
+            if any(cell0_low.startswith(p) or p in cell0_low for p in known_prefixes):
+                continue
+            row_cells = [c.text.strip() for c in row.cells]
+            rules.append(
+                ApprovalRuleDTO(
+                    rule_number=next_rule_num,
+                    category="internal",
+                    doc_type_name=cell0,
+                    is_modular="модуль" in cell0_low,
+                    requires_legal=True,
+                    requires_dou=True,
+                    requires_hr=len(row_cells) > 3 and "+" in row_cells[3],
+                    requires_infosec="yes" if (len(row_cells) > 4 and "+" in row_cells[4]) else "no",
+                    requires_it="yes" if (len(row_cells) > 5 and "+" in row_cells[5]) else "no",
+                    requires_regional="no",
+                    condition_description="Динамически извлечено из таблицы DOCX матрицы визирования.",
+                    signatory="Руководство Организации",
+                    extra_info={
+                        "matrix_section": "custom_table",
+                        "matrix_row": row_idx,
+                        "departments": ["Юридическое подразделение", "Департамент ДОУ"],
+                    },
+                )
+            )
+            next_rule_num += 1
+
     # Generate search chunks for each rule to empower full-text search
     for r in rules:
         dept_str = ", ".join(r.extra_info.get("departments", []))
@@ -1043,6 +1108,13 @@ def extract_template_modules(materials_dir: Path) -> List[TemplateModuleDTO]:
                     "description": "Цели надлежащей организации ДОУ, кадровые перестановки и т.д.",
                 },
                 {
+                    "name": "repeal_order",
+                    "label": "Отменяемый приказ",
+                    "type": "string",
+                    "required": False,
+                    "description": "Дата, номер и наименование ранее изданного приказа, признаваемого утратившим силу (при наличии)",
+                },
+                {
                     "name": "control_officer",
                     "label": "Контроль исполнения",
                     "type": "string",
@@ -1161,7 +1233,7 @@ def extract_template_modules(materials_dir: Path) -> List[TemplateModuleDTO]:
                     "label": "Место размещения",
                     "type": "string",
                     "required": True,
-                    "default": "внутренний информационный портал Организации",
+                    "default": "на внутреннем информационном портале Организации",
                     "description": "Официальный корпоративный ресурс для публикации ЛНА",
                 },
                 {
@@ -1452,8 +1524,17 @@ def extract_template_modules(materials_dir: Path) -> List[TemplateModuleDTO]:
         sha256 = compute_file_hash(file_path)
         doc = docx.Document(file_path)
 
-        # Extract text chunks from template
+        # Extract text chunks from template paragraphs and tables
         text_lines = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+        for tbl in doc.tables:
+            for row in tbl.rows:
+                row_cells: List[str] = []
+                for cell in row.cells:
+                    cell_text = cell.text.strip()
+                    if cell_text and (not row_cells or row_cells[-1] != cell_text):
+                        row_cells.append(cell_text)
+                if row_cells:
+                    text_lines.append(" | ".join(row_cells))
         full_text = "\n".join(text_lines)
 
         chunk = ExtractedChunk(

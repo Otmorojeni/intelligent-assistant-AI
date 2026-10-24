@@ -260,11 +260,15 @@ async def search_chunks_fulltext(
     query_text: str,
     top_k: int = 5,
     min_rank: float = 0.01,
+    user_role: str = "employee",
 ) -> List[Dict[str, Any]]:
-    """Execute PostgreSQL full-text search against Russian TSVECTOR with clause and metadata ranking."""
+    """Execute PostgreSQL full-text search against Russian TSVECTOR with active edition & RBAC filtering."""
     if not query_text or not query_text.strip():
         return []
 
+    from src.core.security import get_role_access_levels
+
+    allowed_levels = get_role_access_levels(user_role)
     clean_query = query_text.strip()
     # Check for clause pattern (e.g. "4.2.3", "п. 4.2.3", "пункт 10.6")
     clause_match = re.search(r"\b(\d+(?:\.\d+)+)\b", clean_query)
@@ -294,13 +298,17 @@ async def search_chunks_fulltext(
             END as match_priority
         FROM document_chunks c
         JOIN knowledge_documents d ON c.document_id = d.id
-        WHERE c.search_vector @@ plainto_tsquery('russian', :query)
-           OR c.content ILIKE :like_query
-           OR c.clause = :clause_candidate
-           OR c.clause ILIKE :like_query
-           OR c.chapter ILIKE :like_query
-           OR d.doc_code ILIKE :like_query
-           OR d.title ILIKE :like_query
+        WHERE d.is_active = TRUE
+          AND d.access_level = ANY(:allowed_levels)
+          AND (
+               c.search_vector @@ plainto_tsquery('russian', :query)
+            OR c.content ILIKE :like_query
+            OR c.clause = :clause_candidate
+            OR c.clause ILIKE :like_query
+            OR c.chapter ILIKE :like_query
+            OR d.doc_code ILIKE :like_query
+            OR d.title ILIKE :like_query
+          )
         ORDER BY match_priority DESC, rank DESC, c.page_number ASC
         LIMIT :top_k;
     """)
@@ -312,6 +320,7 @@ async def search_chunks_fulltext(
             "clean_query": clean_query,
             "clause_candidate": clause_candidate,
             "like_query": f"%{clean_query}%",
+            "allowed_levels": allowed_levels,
             "top_k": top_k,
         },
     )
@@ -402,12 +411,15 @@ async def lookup_defined_term(
     return None
 
 
-# Re-export versioning lifecycle functions
+# Re-export versioning lifecycle functions and backward-compatible aliases
 from src.core.versioning import (
     upload_document_version,
     activate_document_version,
     get_all_document_versions,
 )
+
+seed_database = index_all_materials
+get_term_definition = lookup_defined_term
 
 __all__ = [
     "clear_database",
@@ -415,7 +427,10 @@ __all__ = [
     "save_defined_terms",
     "save_approval_rules",
     "save_template_modules",
+    "index_all_materials",
     "seed_database",
+    "search_chunks_fulltext",
+    "lookup_defined_term",
     "get_term_definition",
     "upload_document_version",
     "activate_document_version",

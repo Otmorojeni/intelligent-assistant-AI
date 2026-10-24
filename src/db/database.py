@@ -52,12 +52,14 @@ async def init_db() -> None:
     from src.db.models import Base
 
     async with engine.begin() as conn:
-        # Включаем pg_trgm для быстрого нечеткого поиска опечаток
-        try:
-            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm;"))
-            logger.info("Extension 'pg_trgm' enabled successfully.")
-        except Exception as e:
-            logger.warning(f"Could not enable pg_trgm: {e}")
+        # Включаем pg_trgm и vector в изолированных savepoint, чтобы не прерывать транзакцию
+        for ext in ("pg_trgm", "vector"):
+            try:
+                async with conn.begin_nested():
+                    await conn.execute(text(f"CREATE EXTENSION IF NOT EXISTS {ext};"))
+                logger.info("Extension '%s' enabled successfully.", ext)
+            except Exception as e:
+                logger.debug("Optional extension '%s' not available: %s", ext, e)
 
         # Создаем таблицы
         await conn.run_sync(Base.metadata.create_all)

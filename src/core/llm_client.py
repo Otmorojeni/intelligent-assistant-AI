@@ -7,7 +7,7 @@ Provides deterministic offline fallback if the server is unreachable.
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import httpx
 
@@ -16,15 +16,14 @@ from src.schemas.api_models import DetectedTermRef, SourceRef
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """Вы — официальный интеллектуальный ассистент по нормативным документам документационного обеспечения управления (ДОУ).
-Ваша задача — сформировать точный, строгий, структурированный и аргументированный ответ на вопрос пользователя ИСКЛЮЧИТЕЛЬНО на основе приведенных фрагментов нормативных документов.
+SYSTEM_PROMPT = """Вы — официальный интеллектуальный ассистент по нормативным документам документационного обеспечения управления (ДОУ) Организации.
+Ваша задача — дать точный, строгий и аргументированный ответ на вопрос пользователя ИСКЛЮЧИТЕЛЬНО на основе приведенных фрагментов нормативных документов.
 
-ОБЯЗАТЕЛЬНЫЕ ТРЕБОВАНИЯ:
-1. Опирайтесь ИСКЛЮЧИТЕЛЬНО на предоставленный нормативный контекст. Категорически запрещено добавлять внешние данные, домыслы или нерегламентированные сведения.
-2. В ответе ОБЯЗАТЕЛЬНО явно приводите ссылки на первоисточник: название документа, его шифр/код, главу/раздел, пункт (например, п. 4.1.3 или п. 10.6) и номер страницы.
-3. Если приведены термины и сокращения, используйте их официальные формулировки и расшифровки.
-4. Излагайте ответ четко, структурированно, профессиональным деловым языком.
-5. Не повторяйте фразы и предложения. Не используйте тавтологий."""
+ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА:
+1. Используйте ТОЛЬКО факты, сроки, условия и формулировки из раздела «НОРМАТИВНЫЙ КОНТЕКСТ». Категорически запрещено додумывать сведения или искажать смысл норм (например, путать сквозную и самостоятельную нумерацию или менять запрет «не ставится» на разрешение).
+2. Цитируйте ТОЛЬКО те номера пунктов, глав и страниц, которые прямо указаны в заголовках блоков [1], [2], [3] предоставленного контекста. Никогда не придумывайте номера пунктов от себя.
+3. Если в контексте указан обязательный маршрут согласования из Матрицы визирования, перечислите все согласующие подразделения и подписанта строго по этому маршруту.
+4. Отвечайте кратко, четко, по существу вопроса, в официально-деловом стиле, без повторов и тавтологий."""
 
 
 def build_offline_fallback_answer(
@@ -48,17 +47,18 @@ def build_offline_fallback_answer(
 
     for idx, s in enumerate(sources[:3], 1):
         clause_str = f"п. {s.clause}" if s.clause else "раздел регламента"
+        body_txt = (s.full_content or s.quote).strip()
         lines.append(
             f"{idx}. В соответствии с документом «{s.document_title}» "
             f"({s.document_code}, {s.chapter}, {clause_str}, стр. {s.page_number}):\n"
-            f"«{s.quote.strip()}»"
+            f"«{body_txt}»"
         )
 
     return "\n\n".join(lines)
 
 
 class OllamaClient:
-    """Asynchronous client for local Ollama LLM with failover and offline fallback."""
+    """Asynchronous client for local Ollama LLM with failover, SSE streaming, and offline fallback."""
 
     def __init__(
         self,
@@ -67,8 +67,8 @@ class OllamaClient:
         fallback_model: Optional[str] = None,
         temperature: Optional[float] = None,
         timeout: Optional[float] = None,
-        max_tokens: int = 350,
-        frequency_penalty: float = 0.5,
+        max_tokens: int = 420,
+        frequency_penalty: float = 0.35,
     ):
         raw_url = base_url or settings.OLLAMA_BASE_URL
         # Normalize localhost to 127.0.0.1 to avoid IPv6 resolution latency on Windows
@@ -85,8 +85,7 @@ class OllamaClient:
     async def is_healthy(self) -> bool:
         """Check if local Ollama server is online and reachable."""
         try:
-            # Check native /api/tags or OpenAI /models
-            host_root = self.base_url.replace("/v1", "")
+            host_root = self.base_url.removesuffix("/v1")
             async with httpx.AsyncClient(timeout=3.0, trust_env=False) as client:
                 resp = await client.get(f"{host_root}/api/tags")
                 return resp.status_code == 200
@@ -99,37 +98,48 @@ class OllamaClient:
         query: str,
         sources: List[SourceRef],
         detected_terms: Optional[List[DetectedTermRef]] = None,
+        approval_summary: Optional[str] = None,
     ) -> str:
-        """Assemble structured prompt with citation context blocks."""
+        """Assemble structured prompt with full normative clauses (no 400-char truncation)."""
         context_parts = []
-        for idx, s in enumerate(sources[:4], 1):
+        for idx, s in enumerate(sources[:3], 1):
             clause_str = f"п. {s.clause}" if s.clause else "раздел"
+            full_text = (s.full_content or s.quote).strip()
+            if len(full_text) > 2200:
+                full_text = full_text[:2200].rstrip() + "..."
             context_parts.append(
-                f"[{idx}] Документ: «{s.document_title}» ({s.document_code}, версия {s.version}, гриф {s.access_level})\n"
-                f"Раздел/Глава: {s.chapter}\n"
-                f"Пункт: {clause_str}\n"
-                f"Страница: {s.page_number}\n"
-                f"Текст:\n{s.quote.strip()}"
+                f"[{idx}] Документ: «{s.document_title}» (шифр: {s.document_code}, версия {s.version}, гриф {s.access_level})\n"
+                f"Глава/Раздел: {s.chapter} | Пункт: {clause_str} | Страница: стр. {s.page_number}\n"
+                f"Полный текст нормы:\n{full_text}"
             )
 
         context_text = "\n\n---\n\n".join(context_parts)
 
         terms_text = ""
         if detected_terms:
-            t_lines = [f"• {t.canonical}: {t.expansion}" for t in detected_terms]
-            terms_text = f"\n\nГЛОССАРИЙ ПРИМЕНИМЫХ ТЕРМИНОВ:\n" + "\n".join(t_lines)
+            t_lines = [
+                f"• {t.canonical} — {t.expansion}"
+                + (f" ({t.definition})" if t.definition else "")
+                for t in detected_terms
+            ]
+            terms_text = "\n\nГЛОССАРИЙ ТЕРМИНОВ:\n" + "\n".join(t_lines)
+
+        approval_text = ""
+        if approval_summary:
+            approval_text = f"\n\nРАСЧЕТ МАРШРУТА СОГЛАСОВАНИЯ ПО МАТРИЦЕ ВИЗИРОВАНИЯ:\n{approval_summary}"
 
         user_content = (
             f"НОРМАТИВНЫЙ КОНТЕКСТ:\n"
             f"{context_text}"
-            f"{terms_text}\n\n"
+            f"{terms_text}"
+            f"{approval_text}\n\n"
             f"ВОПРОС ПОЛЬЗОВАТЕЛЯ:\n{query.strip()}\n\n"
-            f"Дайте исчерпывающий и строго регламентированный ответ со ссылками на пункты и страницы."
+            f"Сформулируйте точный ответ строго по приведенному тексту с указанием шифра документа, пункта и номера страницы."
         )
         return user_content
 
     async def _call_completion(self, model_name: str, messages: List[Dict[str, str]]) -> str:
-        """Send chat completion request to Ollama endpoint."""
+        """Send chat completion request to Ollama endpoint tuned for 2 vCPU / 4 GB RAM."""
         endpoint = f"{self.base_url}/chat/completions"
         payload = {
             "model": model_name,
@@ -137,6 +147,12 @@ class OllamaClient:
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "frequency_penalty": self.frequency_penalty,
+            "keep_alive": settings.LLM_KEEP_ALIVE,
+            "options": {
+                "num_ctx": settings.LLM_NUM_CTX,
+                "num_thread": settings.LLM_NUM_THREAD,
+                "num_predict": self.max_tokens,
+            },
         }
 
         async with httpx.AsyncClient(timeout=self.timeout, trust_env=False) as client:
@@ -146,12 +162,71 @@ class OllamaClient:
             answer = data["choices"][0]["message"]["content"]
             return answer.strip()
 
+    async def generate_answer_stream(
+        self,
+        query: str,
+        sources: List[SourceRef],
+        detected_terms: Optional[List[DetectedTermRef]] = None,
+        approval_summary: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """Stream answer tokens via SSE from local Ollama with deterministic fallback."""
+        if not sources:
+            yield (
+                "В действующей редакции нормативных документов ДОУ Организации "
+                "данный вопрос не регламентирован. Рекомендуется обратиться в "
+                "Департамент ДОУ Организации."
+            )
+            return
+
+        user_prompt = self.build_user_prompt(query, sources, detected_terms, approval_summary=approval_summary)
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
+        endpoint = f"{self.base_url}/chat/completions"
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "frequency_penalty": self.frequency_penalty,
+            "stream": True,
+            "keep_alive": settings.LLM_KEEP_ALIVE,
+            "options": {
+                "num_ctx": settings.LLM_NUM_CTX,
+                "num_thread": settings.LLM_NUM_THREAD,
+                "num_predict": self.max_tokens,
+            },
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout, trust_env=False) as client:
+                async with client.stream("POST", endpoint, json=payload) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line or not line.startswith("data: "):
+                            continue
+                        data_str = line[6:].strip()
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            chunk_obj = json.loads(data_str)
+                            delta = chunk_obj.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                            if delta:
+                                yield delta
+                        except Exception:
+                            continue
+            return
+        except Exception as e:
+            logger.warning("Streaming from Ollama failed (%s), yielding fallback answer.", e)
+            yield build_offline_fallback_answer(query, sources, detected_terms)
+
     async def generate_answer(
         self,
         query: str,
         sources: List[SourceRef],
         detected_terms: Optional[List[DetectedTermRef]] = None,
         allow_fallback: bool = True,
+        approval_summary: Optional[str] = None,
     ) -> str:
         """Generate grounded answer using Ollama with automatic model fallback and offline synthesis."""
         if not sources:
@@ -161,7 +236,12 @@ class OllamaClient:
                 "Департамент ДОУ Организации."
             )
 
-        user_prompt = self.build_user_prompt(query, sources, detected_terms)
+        try:
+            user_prompt = self.build_user_prompt(
+                query, sources, detected_terms, approval_summary=approval_summary
+            )
+        except TypeError:
+            user_prompt = self.build_user_prompt(query, sources, detected_terms)
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},

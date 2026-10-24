@@ -523,6 +523,7 @@ def resolve_matching_rule(
         is_order and bool(re.search(r"\bдоу\b", clean_doc))
     ):
         rule = rules_by_number.get(5) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[4])
+        return rule, notes, True
     if any(code in clean_doc for code in ("mod-order-lna", "утв-04", "order_lna", "локальн", "лна", "регламент", "положени", "инструкци")) or (
         is_order and bool(re.search(r"\bлна\b", clean_doc))
     ):
@@ -836,7 +837,7 @@ def construct_approval_stages(
             order=order,
             role_name="Специалист Департамента ДОУ",
             department="Департамент делопроизводства (ДОУ)",
-            reason="Визирование Департаментом ДОУ: проверка применения модуля, оформления и маршрута (п. 4.2 Методических рекомендаций)",
+            reason="Визирование Департаментом ДОУ после лингвистической экспертизы: проверка применения модуля, оформления и маршрута (п. 4.2 Методических рекомендаций)",
             is_mandatory=True,
         )
     )
@@ -934,13 +935,17 @@ def build_pipeline_approval_recommendation(
 APPROVAL_QUERY_TRIGGERS = (
     "согласов",
     "визир",
-    "виз",
-    "маршрут",
+    "маршрут согласов",
+    "маршрут визир",
+    "маршрут приказ",
+    "маршрут распоряж",
+    "маршрут письм",
     "матриц",
-    "подпис",
     "кто подписывает",
     "кем подписывается",
-    "с кем",
+    "кто подпишет",
+    "с кем согласов",
+    "с кем визир",
     "кто визирует",
     "кто согласует",
     "кто согласовывает",
@@ -950,6 +955,12 @@ APPROVAL_QUERY_TRIGGERS = (
     "этапы визирования",
     "регламент визирования",
     "регламент согласования",
+)
+
+_APPROVAL_WORD_RE = re.compile(
+    r"(?i)\b(?:согласов\w*|визир\w*|виза|визу|визы|визой|матриц\w*\s+визир\w*|"
+    r"маршрут\w*\s+(?:согласов\w*|визир\w*|приказ\w*|распоряж\w*|письм\w*|документ\w*)|"
+    r"кто\s+подписыва\w*|кем\s+подписыва\w*|кто\s+подпишет)\b"
 )
 
 
@@ -963,7 +974,9 @@ def match_approval_from_query(
 
     clean_q = query.strip().lower()
 
-    has_approval_intent = any(trigger in clean_q for trigger in APPROVAL_QUERY_TRIGGERS)
+    has_approval_intent = bool(_APPROVAL_WORD_RE.search(clean_q)) or any(
+        trigger in clean_q for trigger in APPROVAL_QUERY_TRIGGERS
+    )
 
     # Check if query matches a rule number or template module code directly
     has_direct_code = (

@@ -16,6 +16,7 @@ from enum import Enum
 import logging
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
+import unicodedata
 import uuid
 
 from fastapi import Depends, Header, HTTPException, Request, status
@@ -147,21 +148,36 @@ async def get_current_user(
     x_user_name: Optional[str] = Header(None, alias="X-User-Name"),
     authorization: Optional[str] = Header(None),
 ) -> UserContext:
-    """Fast authentication resolver: checks Bearer JWT, X-User-Role header, or defaults to employee."""
-    # 1. Check Bearer JWT token
-    if authorization and authorization.lower().startswith("bearer "):
+    """Fast authentication resolver: checks Bearer JWT, X-User-Role header (non-admin), or defaults to employee."""
+    # 1. Check Bearer JWT token — if provided, it MUST be valid (never fall back to plaintext headers)
+    if authorization:
+        if not authorization.lower().startswith("bearer "):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Authorization header format. Expected 'Bearer <token>'.",
+            )
         token = authorization.split(" ", 1)[1].strip()
         payload = verify_access_token(token)
-        if payload:
-            role = payload.get("role") or payload.get("user_role") or "employee"
-            username = payload.get("sub") or payload.get("username") or payload.get("user_name") or "Пользователь"
-            return UserContext(username=username, role=normalize_role(role))
+        if not payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired Bearer JWT token.",
+            )
+        role = payload.get("role") or payload.get("user_role") or "employee"
+        username = payload.get("sub") or payload.get("username") or payload.get("user_name") or "Пользователь"
+        return UserContext(username=username, role=normalize_role(role))
 
-    # 2. Check X-User-Role header
+    # 2. Check X-User-Role header — admin privileges MUST NEVER be granted via unauthenticated plaintext header
     if x_user_role:
+        norm_role = normalize_role(x_user_role)
+        if norm_role == UserRole.ADMIN.value:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Admin role requires signed Bearer JWT authentication.",
+            )
         return UserContext(
             username=x_user_name or "Пользователь",
-            role=normalize_role(x_user_role),
+            role=norm_role,
         )
 
     # 3. Default to employee
@@ -250,15 +266,24 @@ PROMPT_INJECTION_PATTERNS = [
     r"(?i)\b(?:ignore|disregard|forget|bypass|override)\b.*?\b(?:previous|prior|above|all)\b.*?\b(?:instructions|rules|prompts|directives)\b",
     r"(?i)\b(?:system\s+prompt|reveal\s+(?:system\s+)?prompt|show\s+system\s+prompt|print\s+system\s+instructions)\b",
     r"(?i)\b(?:act\s+as|pretend\s+to\s+be|you\s+are\s+now)\b.*?\b(?:dan|jailbreak|developer\s+mode|unrestricted)\b",
-    # Russian jailbreak & override
-    r"(?i)\b(?:игнорируй|забудь|отмени|сбрось|обойти)\b.*?\b(?:все|предыдущие|ранее\s+данные)?\b.*?\b(?:инструкции|правила|указания|промпты)\b",
-    r"(?i)\b(?:покажи|раскрой|выведи|напечатай)\b.*?\b(?:системный\s+промпт|системную\s+инструкцию|скрытые\s+инструкции|внутренние\s+правила\s+модели|исходный\s+промпт)\b",
-    r"(?i)\b(?:ты\s+теперь|действуй\s+как|притворись)\b.*?\b(?:dan|взлом|режим\s+разработчика|без\s+ограничений)\b",
+    # Russian jailbreak & override (singular, plural/polite imperatives, and infinitives)
+    r"(?i)\b(?:про)?(?:игнорируй(?:те)?|забудь(?:те)?|отмени(?:те)?|сбрось(?:те)?|обойти|обойди(?:те)?|не\s+учитывай(?:те)?)\b.*?\b(?:все|предыдущие|ранее\s+данные)?\b.*?\b(?:инструкции|правила|указания|промпты|ограничения)\b",
+    r"(?i)\b(?:покажи(?:те)?|раскрой(?:те)?|выведи(?:те)?|напечатай(?:те)?)\b.*?\b(?:системный\s+промпт|системную\s+инструкцию|скрытые\s+инструкции|внутренние\s+правила\s+модели|исходный\s+промпт)\b",
+    r"(?i)\b(?:ты\s+теперь|вы\s+теперь|действуй(?:те)?\s+как|притворись|притворитесь|ответь(?:те)?)\b.*?\b(?:dan|взлом|режим\s+разработчика|без\s+ограничений)\b",
     # Script / HTML injection
     r"(?i)<\s*(?:script|iframe|svg|object|embed|style)\b",
     # Shell / SQL injection markers
     r"(?i)(?:;\s*drop\s+table|--\s*$|union\s+select\s+)",
 ]
+
+_ZERO_WIDTH_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\u00ad\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _strip_invisible_chars(text: str) -> str:
+    """Normalize NFKC and strip zero-width / formatting obfuscation characters."""
+    normalized = unicodedata.normalize("NFKC", text)
+    cleaned = _ZERO_WIDTH_RE.sub("", normalized)
+    return "".join(ch for ch in cleaned if unicodedata.category(ch) != "Cf")
 
 
 def detect_prompt_injection(query: str) -> Tuple[bool, Optional[str]]:
@@ -266,8 +291,9 @@ def detect_prompt_injection(query: str) -> Tuple[bool, Optional[str]]:
     if not query:
         return False, None
 
+    normalized_query = _strip_invisible_chars(query)
     for pattern in PROMPT_INJECTION_PATTERNS:
-        match = re.search(pattern, query)
+        match = re.search(pattern, normalized_query)
         if match:
             return True, f"Matched malicious pattern: {match.group(0)}"
 
@@ -275,8 +301,8 @@ def detect_prompt_injection(query: str) -> Tuple[bool, Optional[str]]:
 
 
 def sanitize_query(query: str) -> str:
-    """Sanitize query string by stripping null bytes and normalizing whitespace."""
+    """Sanitize query string by stripping null/invisible bytes and normalizing whitespace."""
     if not query:
         return ""
-    clean = query.replace("\x00", "").replace("\r", " ").strip()
+    clean = _strip_invisible_chars(query).replace("\r", " ").strip()
     return re.sub(r"\s+", " ", clean)

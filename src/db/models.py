@@ -165,3 +165,36 @@ class AuditLog(Base):
     status: Mapped[str] = mapped_column(String(32), default="success", index=True)
     latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
     ip_address: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+
+class ChatSession(Base):
+    """Многошаговые диалоговые сессии пользователя (память контекста, уточнения и слот-филлинг шаблонов)."""
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_name: Mapped[str] = mapped_column(String(128), default="Пользователь", index=True)
+    user_role: Mapped[str] = mapped_column(String(64), default="employee", index=True)
+    title: Mapped[str] = mapped_column(String(256), default="Новый диалог по ДОУ")
+    state_json: Mapped[dict] = mapped_column(JSONB, default=dict)  # pending_clarification, slot_filling, etc.
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+
+    messages: Mapped[List["ChatMessage"]] = relationship(
+        "ChatMessage", back_populates="session", cascade="all, delete-orphan", order_by="ChatMessage.created_at"
+    )
+
+
+class ChatMessage(Base):
+    """Сообщения внутри многошаговой диалоговой сессии."""
+    __tablename__ = "chat_messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chat_sessions.id", ondelete="CASCADE"), index=True
+    )
+    role: Mapped[str] = mapped_column(String(32), index=True)  # user, assistant
+    content: Mapped[str] = mapped_column(Text)
+    metadata_json: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)
+
+    session: Mapped["ChatSession"] = relationship("ChatSession", back_populates="messages")

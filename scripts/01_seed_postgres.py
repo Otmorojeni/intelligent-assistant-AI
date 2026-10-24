@@ -141,6 +141,7 @@ async def verify_database_state() -> bool:
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Seed PostgreSQL database from materials")
     parser.add_argument("--verify-only", action="store_true", help="Only verify existing database data")
+    parser.add_argument("--if-empty", action="store_true", help="Seed only if document_chunks table is empty")
     parser.add_argument("--materials-dir", type=Path, default=settings.MATERIALS_DIR, help="Materials directory")
     args = parser.parse_args()
 
@@ -150,12 +151,21 @@ async def main() -> None:
         print("\n[STEP 1] Initializing PostgreSQL tables and extensions...")
         await init_db()
 
-        print(f"\n[STEP 2] Seeding database from materials at: {args.materials_dir}...")
-        async with async_session_factory() as session:
-            stats = await index_all_materials(session, materials_dir=args.materials_dir, reset=True)
-            print("\nSeeding completed successfully with statistics:")
-            for k, v in stats.items():
-                print(f"  - {k}: {v}")
+        should_seed = True
+        if args.if_empty:
+            async with async_session_factory() as session:
+                existing_chunks = (await session.execute(select(func.count(DocumentChunk.id)))).scalar() or 0
+                if existing_chunks > 0:
+                    print(f"\n[STEP 2] Database already contains {existing_chunks} chunks — skipping reset.")
+                    should_seed = False
+
+        if should_seed:
+            print(f"\n[STEP 2] Seeding database from materials at: {args.materials_dir}...")
+            async with async_session_factory() as session:
+                stats = await index_all_materials(session, materials_dir=args.materials_dir, reset=True)
+                print("\nSeeding completed successfully with statistics:")
+                for k, v in stats.items():
+                    print(f"  - {k}: {v}")
 
     # Always run verification
     success = await verify_database_state()

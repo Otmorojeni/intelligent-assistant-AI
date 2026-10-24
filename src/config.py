@@ -1,4 +1,5 @@
 from pathlib import Path
+import secrets
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -19,12 +20,16 @@ class Settings(BaseSettings):
     DATABASE_URL: str = ""
     DATABASE_URL_SYNC: str = ""
 
-    # Local LLM (Ollama)
+    # Local LLM (Ollama) — tuned for MSKs-2 VM (2 vCPU, 4 GB RAM)
     OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
     OLLAMA_MODEL: str = "qwen2.5:1.5b"
-    OLLAMA_FALLBACK_MODEL: str = "qwen2.5:3b"
+    OLLAMA_FALLBACK_MODEL: str = "qwen2.5:1.5b"
     LLM_TEMPERATURE: float = 0.0
     LLM_TIMEOUT_SECONDS: float = 45.0
+    LLM_NUM_CTX: int = 2048
+    LLM_NUM_PREDICT: int = 450
+    LLM_NUM_THREAD: int = 2
+    LLM_KEEP_ALIVE: str = "24h"
 
     # Application & Server
     APP_HOST: str = "0.0.0.0"
@@ -36,6 +41,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = ""
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+    ADMIN_DEMO_PASSWORD: str = "cdo-admin-2026"
 
     # RAG parameters
     MIN_RELEVANCE_THRESHOLD: float = 25.0
@@ -43,6 +49,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def assemble_db_urls(self) -> "Settings":
+        if not self.SECRET_KEY:
+            self.SECRET_KEY = secrets.token_urlsafe(32)
         if not self.DATABASE_URL and self.POSTGRES_PASSWORD:
             self.DATABASE_URL = (
                 f"postgresql+psycopg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@"

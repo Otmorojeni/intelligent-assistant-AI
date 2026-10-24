@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -20,6 +20,7 @@ class SourceRef(BaseModel):
     clause: str
     page_number: int
     quote: str
+    full_content: Optional[str] = None
     relevance_pct: float
     version: str
     access_level: str
@@ -54,18 +55,27 @@ class QueryRequest(BaseModel):
     query: str = Field(..., min_length=2, max_length=4000)
     request_id: Optional[str] = None
     user_role: str = "employee"  # employee, dou_specialist, security_auditor
-    top_k: int = 5
+    top_k: int = Field(default=5, ge=1, le=20)
+    session_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+    history: Optional[List[Dict[str, str]]] = None
 
 
 class QueryResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_id: str
+    session_id: Optional[str] = None
     answer: str
     relevance_score: float
     detected_terms: List[DetectedTermRef]
     sources: List[SourceRef]
     approval_recommendation: Optional[ApprovalRecommendation] = None
     zero_hallucination_triggered: bool = False
+    needs_clarification: bool = False
+    clarification_question: Optional[str] = None
+    quick_replies: List[str] = Field(default_factory=list)
+    slot_filling_state: Optional[Dict[str, Any]] = None
+    generated_document: Optional[Dict[str, Any]] = None
     latency_ms: float
     t_match_ms: float = 0.0
     t_retriever_ms: float = 0.0
@@ -197,6 +207,7 @@ class TokenRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     username: str = "Пользователь"
     role: str = "employee"
+    password: Optional[str] = None
 
 
 class TokenResponse(BaseModel):
@@ -205,4 +216,33 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     role: str
     username: str
+
+
+class ComplianceIssue(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rule_id: str
+    severity: str  # critical, warning, info
+    clause_ref: str
+    title: str
+    description: str
+    recommendation: str
+
+
+class ComplianceCheckResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    file_name: str
+    detected_doc_kind: str
+    is_modular: bool
+    detected_module_code: Optional[str] = None
+    score_pct: float
+    passed: bool
+    is_compliant: bool = False
+    total_checks: int
+    passed_checks: int
+    critical_count: int = 0
+    warning_count: int = 0
+    info_count: int = 0
+    issues: List[ComplianceIssue]
+    approval_recommendation: Optional[ApprovalRecommendation] = None
+    checked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

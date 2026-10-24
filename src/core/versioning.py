@@ -58,9 +58,9 @@ def parse_uploaded_document(
         raise FileNotFoundError(f"File not found: {file_path}")
 
     suffix = file_path.suffix.lower()
-    if suffix not in [".pdf", ".docx", ".doc"]:
+    if suffix not in [".pdf", ".docx"]:
         raise ValueError(
-            f"Unsupported file format '{suffix}'. Supported formats: .pdf, .docx, .doc"
+            f"Unsupported file extension '{suffix}'. Only .pdf and .docx are supported."
         )
 
     file_size = file_path.stat().st_size
@@ -137,7 +137,7 @@ def parse_uploaded_document(
                     )
                 )
 
-    elif suffix in [".docx", ".doc"]:
+    elif suffix == ".docx":
         if doc_type in ["guideline", "guidelines"]:
             try:
                 extracted = extract_guidelines_document(file_path)
@@ -199,6 +199,17 @@ def parse_uploaded_document(
                 current_chapter = text
             else:
                 current_lines.append(text)
+
+        # Also extract text from all DOCX tables so tabular matrices and forms are indexed
+        for tbl_idx, tbl in enumerate(doc.tables, start=1):
+            for row in tbl.rows:
+                row_cells: List[str] = []
+                for cell in row.cells:
+                    cell_txt = cell.text.replace("\xa0", " ").strip()
+                    if cell_txt and (not row_cells or row_cells[-1] != cell_txt):
+                        row_cells.append(cell_txt)
+                if row_cells:
+                    current_lines.append(" | ".join(row_cells))
 
         if current_lines:
             chunks.append(
@@ -298,6 +309,25 @@ async def upload_document_version(
 
     # 4. Save new document and chunks with search_vector computed column
     db_doc = await save_extracted_document(session, extracted_doc)
+
+    # 5. If an updated Approval Matrix DOCX was uploaded, dynamically refresh new approval_rules
+    if (clean_code == "APPROVAL-MATRIX" or clean_type == "matrix") and target_path.suffix.lower() == ".docx":
+        try:
+            async with session.begin_nested():
+                from src.core.extractor import extract_approval_matrix_data
+                from src.core.indexer import save_approval_rules
+                from src.db.models import ApprovalRule
+
+                _, parsed_rules = extract_approval_matrix_data(target_path)
+                existing_nums = set(
+                    (await session.execute(select(ApprovalRule.rule_number))).scalars().all()
+                )
+                new_rules = [r for r in parsed_rules if r.rule_number not in existing_nums]
+                if new_rules:
+                    await save_approval_rules(session, new_rules)
+        except Exception as exc:
+            logger.warning(f"Optional matrix rules refresh skipped: {exc}")
+
     await session.commit()
     await session.refresh(db_doc)
 

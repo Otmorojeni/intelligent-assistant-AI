@@ -323,7 +323,11 @@ def substitute_template_fields(
         purpose = fields.get("purpose", "совершенствования внутренних процессов Организации")
         effective_date = fields.get("effective_date", datetime.now().strftime("%d.%m.%Y"))
         resp_dept = fields.get("responsible_dept", executor_department or "Департамент ДОУ")
-        placement = fields.get("placement_location", "на корпоративном портале Организации")
+        placement = fields.get("placement_location", "на внутреннем информационном портале Организации").strip()
+        if placement.lower().startswith("внутренний информационный портал"):
+            placement = "на внутреннем информационном портале" + placement[len("внутренний информационный портал"):]
+        elif not re.match(r"^(?:на|в|во)\s+", placement, re.I):
+            placement = f"на {placement}"
         repeal_act = fields.get("repeal_act", "")
         control = fields.get("control_officer", "Заместителя Председателя Организации")
 
@@ -403,7 +407,8 @@ def substitute_template_fields(
                 p.alignment = align
             elif "подготовить план мероприятий" in txt:
                 align = p.alignment
-                p.text = f"6. {audited_dept} подготовить план мероприятий по результатам аудита."
+                plan_deadline = fields.get("plan_deadline") or deadline
+                p.text = f"6. {audited_dept} до {plan_deadline} подготовить план мероприятий по результатам аудита."
                 p.alignment = align
             elif "7. Контроль за исполнением настоящего распоряжения" in txt:
                 align = p.alignment
@@ -488,6 +493,7 @@ def substitute_template_fields(
         subj = fields.get("workgroup_subject", "подготовке предложений")
         goal = fields.get("goal", "выработки согласованных решений")
         leader = fields.get("leader", executor_name or "руководитель рабочей группы")
+        deputy_leader = str(fields.get("deputy_leader", "") or "").strip()
         secretary = fields.get("secretary", "секретарь рабочей группы")
         members = fields.get("members", "члены рабочей группы")
         deadline = fields.get("deadline", datetime.now().strftime("%d.%m.%Y"))
@@ -529,7 +535,8 @@ def substitute_template_fields(
         if len(doc.tables) >= 2:
             tbl = doc.tables[1]
             if len(tbl.rows) >= 4:
-                tbl.rows[1].cells[1].text = leader
+                leader_cell = f"{leader} (заместитель руководителя: {deputy_leader})" if deputy_leader else leader
+                tbl.rows[1].cells[1].text = leader_cell
                 tbl.rows[2].cells[1].text = secretary
                 tbl.rows[3].cells[1].text = members
 

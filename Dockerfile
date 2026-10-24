@@ -24,6 +24,7 @@ COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY materials/ ./materials/
 COPY tests/ ./tests/
+COPY ui/ ./ui/
 
 # Create directories for generated DOCX files and static React/Next.js frontend export
 RUN mkdir -p /app/generated_docs /app/ui

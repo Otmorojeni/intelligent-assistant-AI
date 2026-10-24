@@ -4,10 +4,10 @@ import json
 import logging
 from pathlib import Path
 import time
-from typing import AsyncGenerator, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
 import httpx
 from sqlalchemy import func, select, text
@@ -46,6 +46,7 @@ from src.core.security import (
 )
 from src.core.versioning import (
     activate_document_version,
+    delete_document_version,
     get_all_document_versions,
     query_audit_logs,
     upload_document_version,
@@ -58,6 +59,7 @@ from src.schemas.api_models import (
     ApprovalRuleItem,
     AuditLogItem,
     ComplianceCheckResponse,
+    DocumentDeleteResponse,
     DocumentGenerateRequest,
     DocumentGenerateResponse,
     DocumentVersionItem,
@@ -602,6 +604,29 @@ async def list_document_versions(
     return await get_all_document_versions(session)
 
 
+@router.get(
+    "/documents/{doc_code}",
+    response_model=List[DocumentVersionItem],
+    status_code=status.HTTP_200_OK,
+    summary="Get all versions of a specific document",
+    description="Returns all registered editions of doc_code with chunk counts and active status.",
+)
+async def get_document_versions_by_code(
+    doc_code: str,
+    session: AsyncSession = Depends(get_db),
+) -> List[DocumentVersionItem]:
+    """Retrieve all versions of a specific document by code."""
+    clean_code = (doc_code or "").strip()
+    all_versions = await get_all_document_versions(session)
+    matching = [v for v in all_versions if v.doc_code.upper() == clean_code.upper()]
+    if not matching:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document with code '{clean_code}' not found.",
+        )
+    return matching
+
+
 @router.post(
     "/documents/{doc_code}/activate-version/{version}",
     response_model=DocumentVersionItem,
@@ -694,6 +719,63 @@ async def switch_document_version_body(
     return await switch_document_version(
         doc_code=payload.doc_code,
         version=payload.version,
+        raw_request=raw_request,
+        current_user=current_user,
+        session=session,
+    )
+
+
+@router.delete(
+    "/documents/{doc_code}",
+    response_model=DocumentDeleteResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Delete document or specific version from knowledge base",
+    description="Deletes all indexed chunks and metadata for doc_code. Optionally supply ?version=X to delete only a specific edition. Requires dou_specialist or admin.",
+)
+async def delete_document_endpoint(
+    doc_code: str,
+    version: Optional[str] = Query(None, description="Optional version to delete"),
+    raw_request: Request = None,
+    current_user: UserContext = Depends(require_role(["dou_specialist", "admin"])),
+    session: AsyncSession = Depends(get_db),
+) -> DocumentDeleteResponse:
+    """Delete document or specific version from knowledge base."""
+    client_ip = raw_request.client.host if (raw_request and raw_request.client) else None
+    result = await delete_document_version(session, doc_code.strip(), version.strip() if version else None)
+
+    await log_audit_event(
+        session=session,
+        user_role=current_user.role,
+        user_name=current_user.username,
+        action_type="delete_version",
+        query_text=f"Deleted {doc_code}" + (f" v{version}" if version else ""),
+        response_summary=f"Successfully deleted {doc_code} (versions: {result.get('deleted_versions')})",
+        status="success",
+        latency_ms=0.0,
+        ip_address=client_ip,
+    )
+    await session.commit()
+    return DocumentDeleteResponse(**result)
+
+
+@router.delete(
+    "/documents/{doc_code}/versions/{version}",
+    response_model=DocumentDeleteResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Delete specific version of a document",
+    description="Deletes a specific edition of a document. Requires dou_specialist or admin.",
+)
+async def delete_document_version_endpoint(
+    doc_code: str,
+    version: str,
+    raw_request: Request = None,
+    current_user: UserContext = Depends(require_role(["dou_specialist", "admin"])),
+    session: AsyncSession = Depends(get_db),
+) -> DocumentDeleteResponse:
+    """Delete specific version of document from knowledge base."""
+    return await delete_document_endpoint(
+        doc_code=doc_code,
+        version=version,
         raw_request=raw_request,
         current_user=current_user,
         session=session,

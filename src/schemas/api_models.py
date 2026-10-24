@@ -253,3 +253,11 @@ class ComplianceCheckResponse(BaseModel):
     fixed_file_url: Optional[str] = None
     checked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+
+class DocumentDeleteResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    deleted_doc_code: str
+    deleted_versions: List[str]
+    deleted_count: int
+    activated_version: Optional[str] = None
+

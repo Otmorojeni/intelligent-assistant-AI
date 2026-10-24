@@ -657,6 +657,80 @@ class TestSecurityVersioning(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(audit)
             self.assertEqual(audit.user_role, "employee", "Bearer token role must override body spoofing!")
 
+    async def test_delete_document_version_and_endpoint(self):
+        """Verify DELETE endpoint removes document versions and purges chunks from database."""
+        admin_token = create_access_token({"sub": "admin_user", "role": "admin"})
+        emp_token = create_access_token({"sub": "emp_user", "role": "employee"})
+
+        docx_stream = io.BytesIO()
+        doc = docx.Document()
+        doc.add_heading("Глава 1. Тестовый документ для удаления", level=1)
+        doc.add_paragraph("1.1. Тестовый параграф для удаления.")
+        doc.save(docx_stream)
+        docx_bytes = docx_stream.getvalue()
+
+        transport = ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            # 1. Upload v1.0
+            r1 = await client.post(
+                "/v1/documents/upload-version",
+                files={"file": ("test_del.docx", docx_bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+                data={
+                    "doc_code": "OD-DEL-TEST",
+                    "title": "Тестовый документ на удаление",
+                    "version": "1.0",
+                    "doc_type": "instruction",
+                    "access_level": "public",
+                },
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            self.assertEqual(r1.status_code, 201)
+
+            # 2. Upload v2.0
+            r2 = await client.post(
+                "/v1/documents/upload-version",
+                files={"file": ("test_del.docx", docx_bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+                data={
+                    "doc_code": "OD-DEL-TEST",
+                    "title": "Тестовый документ на удаление",
+                    "version": "2.0",
+                    "doc_type": "instruction",
+                    "access_level": "public",
+                },
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            self.assertEqual(r2.status_code, 201)
+
+            # 3. RBAC: employee cannot delete
+            r_forbidden = await client.delete(
+                "/v1/documents/OD-DEL-TEST/versions/2.0",
+                headers={"Authorization": f"Bearer {emp_token}"},
+            )
+            self.assertEqual(r_forbidden.status_code, 403)
+
+            # 4. Admin deletes v2.0
+            r_del_v2 = await client.delete(
+                "/v1/documents/OD-DEL-TEST/versions/2.0",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            self.assertEqual(r_del_v2.status_code, 200)
+            del_data = r_del_v2.json()
+            self.assertEqual(del_data["deleted_doc_code"], "OD-DEL-TEST")
+            self.assertEqual(del_data["activated_version"], "1.0")
+
+            # 5. Delete remaining document entirely
+            r_del_all = await client.delete(
+                "/v1/documents/OD-DEL-TEST",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            self.assertEqual(r_del_all.status_code, 200)
+
+        # 6. Verify zero chunks remain in DB
+        async with async_session_factory() as session:
+            stmt = select(KnowledgeDocument).where(KnowledgeDocument.doc_code == "OD-DEL-TEST")
+            docs = (await session.execute(stmt)).scalars().all()
+            self.assertEqual(len(docs), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

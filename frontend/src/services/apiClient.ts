@@ -281,6 +281,22 @@ export async function activateDocumentVersion(
   return handleResponse<DocumentVersionItem>(res);
 }
 
+
+export async function deleteDocumentVersion(
+  docCode: string,
+  version?: string,
+  token?: string | null
+): Promise<{ deleted_doc_code: string; deleted_versions: string[]; deleted_count: number }> {
+  const url = version
+    ? `${API_BASE}/v1/documents/${encodeURIComponent(docCode)}/versions/${encodeURIComponent(version)}`
+    : `${API_BASE}/v1/documents/${encodeURIComponent(docCode)}`;
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers: authHeaders(token, false),
+  });
+  return handleResponse<{ deleted_doc_code: string; deleted_versions: string[]; deleted_count: number }>(res);
+}
+
 export async function fetchAuditLogs(
   params: {
     action_type?: string;

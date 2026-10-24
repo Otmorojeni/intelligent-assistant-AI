@@ -377,6 +377,72 @@ async def activate_document_version(
     return target_doc
 
 
+async def delete_document_version(
+    session: AsyncSession,
+    doc_code: str,
+    version: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Delete a document version (or all versions of doc_code if version is None).
+
+    If an active version is deleted and other versions remain, automatically activates
+    the latest remaining version.
+    """
+    clean_code = (doc_code or "").strip()
+    if not clean_code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Document code is required.",
+        )
+
+    stmt = select(KnowledgeDocument).where(KnowledgeDocument.doc_code == clean_code)
+    if version:
+        clean_version = version.strip()
+        stmt = stmt.where(KnowledgeDocument.version == clean_version)
+    else:
+        clean_version = None
+
+    docs_to_delete = (await session.execute(stmt)).scalars().all()
+    if not docs_to_delete:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document '{clean_code}'" + (f" version '{clean_version}'" if clean_version else "") + " not found.",
+        )
+
+    deleted_versions = [d.version for d in docs_to_delete]
+    was_active = any(d.is_active for d in docs_to_delete)
+
+    for d in docs_to_delete:
+        await session.delete(d)
+
+    await session.flush()
+
+    # If an active version was deleted, see if any remaining version exists to activate
+    activated_remaining = None
+    if was_active and clean_version:
+        remaining_stmt = (
+            select(KnowledgeDocument)
+            .where(KnowledgeDocument.doc_code == clean_code)
+            .order_by(KnowledgeDocument.created_at.desc())
+        )
+        remaining_docs = (await session.execute(remaining_stmt)).scalars().all()
+        if remaining_docs and not any(r.is_active for r in remaining_docs):
+            remaining_docs[0].is_active = True
+            activated_remaining = remaining_docs[0].version
+
+    await session.commit()
+    logger.info(
+        f"Deleted document {clean_code} versions {deleted_versions}. "
+        f"Auto-activated: {activated_remaining}"
+    )
+
+    return {
+        "deleted_doc_code": clean_code,
+        "deleted_versions": deleted_versions,
+        "deleted_count": len(deleted_versions),
+        "activated_version": activated_remaining,
+    }
+
+
 async def get_all_document_versions(
     session: AsyncSession,
 ) -> List[DocumentVersionItem]:

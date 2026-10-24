@@ -54,3 +54,9 @@ materials/*.mp4
 # Generated files
 generated_docs/*
 !generated_docs/.gitkeep
+
+# Frontend dependencies & cache
+node_modules/
+frontend/node_modules/
+frontend/.vite/
+*.tsbuildinfo

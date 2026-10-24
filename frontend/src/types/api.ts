@@ -1,7 +1,22 @@
 export type UserRole = "employee" | "dou_specialist" | "security_auditor" | "admin";
 export type AccessLevel = "public" | "internal" | "dsp" | "confidential" | "secret";
 
-export type ScreenId = "assistant" | "constructor" | "compliance" | "governance";
+export type ScreenId = "assistant" | "constructor" | "compliance" | "matrix" | "governance";
+
+export interface ChatTurn {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: string;
+  responseMeta?: Partial<QueryResponse>;
+}
+
+export interface ChatSessionRecord {
+  id: string;
+  title: string;
+  updatedAt: string;
+  turns: ChatTurn[];
+}
 
 export interface HealthResponse {
   status: string;
@@ -106,18 +121,21 @@ export interface QueryResponse {
 export interface TemplateFieldSchema {
   name: string;
   label: string;
+  type?: string;
   required?: boolean;
   default?: string;
   description?: string;
 }
 
 export interface TemplateModuleInfo {
+  id?: number | string;
   module_code: string;
   doc_kind: string;
   title: string;
   reg_number: string;
   version: string;
-  file_name: string;
+  file_name?: string;
+  default_rule_number?: number;
   fields_schema: TemplateFieldSchema[];
 }
 

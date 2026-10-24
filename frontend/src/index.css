@@ -4,13 +4,15 @@
 
 @layer base {
   html {
-    font-size: 16px;
+    font-size: 18px;
+    font-family: "IBM Plex Sans", "Golos Text", system-ui, -apple-system, sans-serif;
+    letter-spacing: -0.01em;
   }
 
   body {
     background-color: #08080A;
     color: #F4F4F5;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    font-family: "IBM Plex Sans", "Golos Text", system-ui, -apple-system, sans-serif;
   }
 }
 
@@ -33,18 +35,91 @@
   background: rgba(255, 255, 255, 0.28);
 }
 
-/* Serious restrained ambient background (Obsidian + subtle deep burgundy aura) */
+/* Serious restrained ambient background (Obsidian + subtle deep red aura) */
 .zyricon-stage-bg {
   background:
-    radial-gradient(circle at 50% 12%, rgba(197, 3, 55, 0.12) 0%, rgba(18, 18, 22, 0.96) 55%, #08080A 100%);
+    radial-gradient(circle at 50% 15%, rgba(220, 38, 38, 0.2) 0%, rgba(18, 18, 22, 0.96) 55%, #08080A 100%);
 }
 
-/* Serious executive sphere (Obsidian & Crimson metallic) */
+/* Small avatar planet for chat messages */
 .zyricon-orb {
-  background: radial-gradient(circle at 35% 30%, #F4F4F5 0%, #C50337 38%, #4C0519 72%, #09090B 100%);
+  background:
+    radial-gradient(circle at 30% 28%, #FCA5A5 0%, #EF4444 26%, #B91C1C 55%, #450A0A 85%, #090202 100%);
   box-shadow:
-    0 0 40px rgba(197, 3, 55, 0.35),
-    inset 0 2px 5px rgba(255, 255, 255, 0.45);
+    0 0 18px rgba(220, 38, 38, 0.55),
+    inset -4px -4px 8px rgba(0, 0, 0, 0.88),
+    inset 2px 2px 4px rgba(255, 200, 200, 0.45);
+}
+
+/* Seamless 360-degree longitudinal globe rotation around Mars's tilted axis */
+@keyframes marsGlobeRotate360 {
+  0% {
+    transform: translateX(0px);
+  }
+  100% {
+    transform: translateX(-200px);
+  }
+}
+
+/* Slow cloud/dust storm drift at a slightly different speed for parallax depth */
+@keyframes marsDustDrift {
+  0% {
+    transform: translateX(-200px);
+  }
+  100% {
+    transform: translateX(0px);
+  }
+}
+
+/* Bright radiant pulsing / illumination of Mars */
+@keyframes planetPulseHalo {
+  0%, 100% {
+    filter:
+      drop-shadow(0 0 18px rgba(220, 38, 38, 0.5))
+      drop-shadow(0 0 45px rgba(185, 28, 28, 0.38));
+    transform: scale(0.98);
+  }
+  50% {
+    filter:
+      drop-shadow(0 0 30px rgba(254, 202, 202, 0.85))
+      drop-shadow(0 0 75px rgba(239, 68, 68, 0.95))
+      drop-shadow(0 0 145px rgba(197, 3, 55, 0.85));
+    transform: scale(1.04);
+  }
+}
+
+/* Ambient light flare behind Mars that illuminates the stage */
+@keyframes planetLightFlare {
+  0%, 100% {
+    opacity: 0.25;
+    transform: scale(0.88);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.3);
+  }
+}
+
+.red-planet-container {
+  animation: planetPulseHalo 3.2s ease-in-out infinite;
+}
+
+.red-planet-flare {
+  background: radial-gradient(
+    circle,
+    rgba(239, 68, 68, 0.68) 0%,
+    rgba(197, 3, 55, 0.42) 38%,
+    rgba(185, 28, 28, 0) 72%
+  );
+  animation: planetLightFlare 3.2s ease-in-out infinite;
+}
+
+.mars-surface-scroll {
+  animation: marsGlobeRotate360 18s linear infinite;
+}
+
+.mars-atmosphere-scroll {
+  animation: marsDustDrift 28s linear infinite;
 }
 
 /* Specular 1px architectural cards */
@@ -60,17 +135,35 @@
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.055) 0%, rgba(255, 255, 255, 0.02) 100%);
 }
 
+/* Illuminated border & ambient crimson halo on the prompt input box */
 .zyricon-input-box {
-  background: #111115;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(180deg, #151218 0%, #0E0E12 100%);
+  border: 1.5px solid rgba(197, 3, 55, 0.75);
   box-shadow:
-    0 20px 50px -12px rgba(0, 0, 0, 0.75),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+    0 0 24px rgba(197, 3, 55, 0.38),
+    0 0 60px rgba(197, 3, 55, 0.16),
+    0 20px 50px -12px rgba(0, 0, 0, 0.85),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 0 20px rgba(197, 3, 55, 0.1);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.zyricon-input-box:hover {
+  border-color: rgba(225, 29, 72, 0.9);
+  box-shadow:
+    0 0 30px rgba(197, 3, 55, 0.48),
+    0 0 70px rgba(197, 3, 55, 0.22),
+    0 20px 50px -12px rgba(0, 0, 0, 0.85),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 0 24px rgba(197, 3, 55, 0.14);
 }
 
 .zyricon-input-box:focus-within {
-  border-color: #C50337;
+  border-color: #FF1E56;
   box-shadow:
-    0 20px 50px -12px rgba(197, 3, 55, 0.18),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+    0 0 36px rgba(197, 3, 55, 0.62),
+    0 0 85px rgba(197, 3, 55, 0.28),
+    0 20px 50px -12px rgba(0, 0, 0, 0.9),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 0 28px rgba(197, 3, 55, 0.18);
 }

@@ -25,9 +25,9 @@ class Settings(BaseSettings):
     OLLAMA_MODEL: str = "qwen2.5:1.5b"
     OLLAMA_FALLBACK_MODEL: str = "qwen2.5:1.5b"
     LLM_TEMPERATURE: float = 0.0
-    LLM_TIMEOUT_SECONDS: float = 45.0
+    LLM_TIMEOUT_SECONDS: float = 15.0
     LLM_NUM_CTX: int = 2048
-    LLM_NUM_PREDICT: int = 450
+    LLM_NUM_PREDICT: int = 220
     LLM_NUM_THREAD: int = 4
     LLM_KEEP_ALIVE: str = "24h"
 

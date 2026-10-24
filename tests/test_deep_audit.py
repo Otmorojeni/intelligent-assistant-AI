@@ -41,7 +41,7 @@ from src.core.retriever import retrieve_chunks
 from src.core.security import create_access_token, detect_prompt_injection
 from src.core.versioning import upload_document_version
 from src.db.database import async_session_factory
-from src.db.models import AuditLog, DocumentChunk, KnowledgeDocument, ProjectCard
+from src.db.models import ApprovalRule, AuditLog, DocumentChunk, KnowledgeDocument, ProjectCard
 from src.main import app
 from src.schemas.api_models import ApprovalCalculateRequest, QueryRequest
 
@@ -92,6 +92,9 @@ class TestEdgeCaseCapabilities(unittest.IsolatedAsyncioTestCase):
                 delete(AuditLog).where(
                     AuditLog.query_text.ilike("%EDGE_AUDIT_MARKER%")
                 )
+            )
+            await session.execute(
+                delete(ApprovalRule).where(ApprovalRule.rule_number > 13)
             )
             await session.commit()
 
@@ -197,6 +200,9 @@ class TestAuditExposedDefects(unittest.IsolatedAsyncioTestCase):
                 delete(AuditLog).where(
                     AuditLog.query_text.ilike("%AUDIT_SENTINEL_%")
                 )
+            )
+            await session.execute(
+                delete(ApprovalRule).where(ApprovalRule.rule_number > 13)
             )
             await session.commit()
 

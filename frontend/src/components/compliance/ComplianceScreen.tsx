@@ -3,11 +3,13 @@ import {
   AlertOctagon,
   AlertTriangle,
   CheckCircle2,
+  Download,
   FileCheck2,
   FileUp,
   GitMerge,
   Info,
   ShieldCheck,
+  Wand2,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { checkDocxCompliance } from "../../services/apiClient";
@@ -24,6 +26,12 @@ const RULES_SUMMARY = [
   { code: "CHK-08", text: "Замена заглушки подписи «И. О. Фамилия» на реального подписанта" },
   { code: "CHK-09", text: "Наличие пункта о контроле за исполнением документа (п. 9.2.6, 9.7.6 ОД-184)" },
   { code: "CHK-10", text: "Наличие констатирующей части / преамбулы (п. 9.1.4 ОД-184)" },
+  { code: "CHK-MARG", text: "Поля страницы: левое ≥ 30 мм, правое ≥ 15 мм, верх/низ ≥ 20 мм (п. 5.1 ОД-184)" },
+  { code: "CHK-FONT", text: "Шрифт Times New Roman / Arial / PT Astra Serif, 12–14 pt (п. 5.2 ОД-184)" },
+  { code: "CHK-LINE", text: "Межстрочный интервал: одинарный или полуторный 1.0–1.5 (п. 5.3 ОД-184)" },
+  { code: "CHK-INDENT", text: "Абзацный отступ первой строки (красная строка) 1.25 см (п. 5.3 ОД-184)" },
+  { code: "CHK-TITLE", text: "Заголовок к тексту («О ...» / «Об ...») без точки и без подчеркивания (п. 5.5 ОД-184)" },
+  { code: "CHK-SIGN", text: "Реквизит «Подпись»: наименование должности, подпись/ЭП, ФИО (п. 6.1 ОД-184)" },
 ];
 
 export const ComplianceScreen: React.FC = () => {
@@ -194,6 +202,18 @@ export const ComplianceScreen: React.FC = () => {
                       </h2>
                     </div>
                   </div>
+
+                  {result.fixed_file_url && (
+                    <a
+                      href={result.fixed_file_url}
+                      download
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/[0.08] hover:bg-white/[0.16] text-white border border-white/[0.2] transition-colors text-sm font-medium shrink-0"
+                    >
+                      <Wand2 className="w-4 h-4 text-[#C50337]" />
+                      <span>Скачать исправленный .DOCX</span>
+                      <Download className="w-4 h-4 text-zinc-300 ml-1" />
+                    </a>
+                  )}
                 </div>
 
                 {/* Counters */}

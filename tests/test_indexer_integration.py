@@ -25,15 +25,12 @@ from src.db.models import (
 class TestIndexerIntegration(unittest.IsolatedAsyncioTestCase):
     """Integration tests connecting to live PostgreSQL container."""
 
-    @classmethod
-    async def asyncSetUpClass(cls):
+    async def asyncSetUp(self):
         await init_db()
         async with async_session_factory() as session:
-            await index_all_materials(session, reset=True)
-
-    @classmethod
-    async def asyncTearDownClass(cls):
-        await engine.dispose()
+            count = (await session.execute(select(func.count(DefinedTerm.id)))).scalar()
+            if not count:
+                await index_all_materials(session, reset=False)
 
     async def test_full_database_seeding_and_counts(self):
         """Verify complete indexing workflow creates all expected records."""

@@ -47,6 +47,31 @@ DOU_QUERY_EXPANSIONS: Dict[str, str] = {
     "реестр замечаний": "таблица замечаний реестр замечаний повторное рассмотрение Приложение № 1 10.4 10.5",
     "собрать замечания": "таблица замечаний автор содержание позиция исполнителя принято отклонено Приложение № 1 10.4 10.5",
     "на основе модульного": "модульный документ модуль документа Методические рекомендации проверка визирование 3.3 4.1 4.2 9.16.1",
+    "проектного комитета": "проектный комитет MOD-DISP-PROJECT УТВ-06 9.5.7 роли Председатель Заместитель председателя Секретарь Члены",
+    "проектный комитет": "проектный комитет MOD-DISP-PROJECT УТВ-06 9.5.7 роли Председатель Заместитель председателя Секретарь Члены",
+    "рабочей группы": "рабочая группа MOD-DISP-WORKGROUP УТВ-07 9.5.7 роли руководитель заместитель секретарь члены",
+    "рабочая группа": "рабочая группа MOD-DISP-WORKGROUP УТВ-07 9.5.7 роли руководитель заместитель секретарь члены",
+    "от руки": "рукописный черновик изготовление проекта документа 2.1.4 5.1",
+    "рукописн": "рукописный черновик изготовление проекта документа 2.1.4 5.1",
+    "рукопис": "рукописный черновик изготовление проекта документа 2.1.4 5.1",
+    "черновик": "проект документа черновик 2.1.4 5.1",
+    "черновики": "проект документа черновик 2.1.4 5.1",
+    "полужирн": "выделение текста полужирным шрифтом реквизиты 3.2 5.3",
+    "полужирный": "выделение текста полужирным шрифтом реквизиты 3.2 5.3",
+    "жирным": "выделение текста полужирным шрифтом реквизиты 3.2 5.3",
+    "жирн": "выделение текста полужирным шрифтом реквизиты 3.2 5.3",
+    "колонтитул": "колонтитулы нумерация страниц вторая последующие страницы 8.16 6.2 3.3",
+    "колонтитулы": "колонтитулы нумерация страниц вторая последующие страницы 8.16 6.2 3.3",
+    "нумерация страниц": "нумерация страниц колонтитулы арабскими цифрами 8.16 6.2",
+    "нумераци": "нумерация страниц колонтитулы арабскими цифрами 8.16 6.2",
+    "шрифт": "шрифт гарнитура размер кегль Times New Roman Arial PT Astra Serif 5.2",
+    "шрифты": "шрифт гарнитура размер кегль Times New Roman Arial PT Astra Serif 5.2",
+    "поля": "поля страницы левое правое верхнее нижнее 5.1",
+    "полей": "поля страницы левое правое верхнее нижнее 5.1",
+    "отступ": "абзацный отступ первая строка 1.25 см 5.3",
+    "отступы": "абзацный отступ первая строка 1.25 см 5.3",
+    "интервал": "межстрочный интервал одинарный полуторный 5.3",
+    "интервалы": "межстрочный интервал одинарный полуторный 5.3",
 }
 
 RUSSIAN_STOPWORDS: Set[str] = {
@@ -67,7 +92,140 @@ CONVERSATIONAL_FILLER_WORDS: Set[str] = {
     "правильно", "корректно", "необходимо", "требуется", "следует", "готовлю", "подготовил", "подготовила",
     "большой", "небольшой", "несколько", "несколькими", "нескольких", "кому", "кого", "кем",
     "каким", "какими", "каких", "какую", "какому", "собрать", "организовать", "устанавливать",
+    "коллега", "коллеги", "коллегой", "коллегам", "коллег",
+    "сказал", "сказала", "сказали", "говорит", "говорят", "слышал", "слышала",
+    "правда", "действительно", "регламенту", "регламент", "регламенте",
+    "вопрос", "сомневаюсь", "уверен", "уверена", "думаю", "считаю",
+    "знаешь", "знаете", "бывает", "слушай", "слушайте", "посоветуй", "посоветуйте",
+    "скока", "скоко", "сколька", "скольки",
 }
+
+SLANG_SYNONYMS: Dict[str, str] = {
+    "юзер": "пользователь",
+    "юзеру": "пользователю",
+    "юзера": "пользователя",
+    "юзеров": "пользователей",
+    "юзерам": "пользователям",
+    "инфобез": "информационная безопасность",
+    "инфобезопасности": "информационная безопасность",
+    "ит": "информационные технологии",
+    "иб": "информационная безопасность",
+    "дбо": "дистанционное банковское обслуживание",
+    "согласовалка": "маршрут согласования",
+    "визирование": "согласование визирование",
+    "доушник": "специалист делопроизводства",
+    "кадровик": "специалист кадрового подразделения",
+    "безопасник": "офицер информационной безопасности",
+    "эцп": "электронная подпись",
+}
+
+CYR_TO_LAT_MAP: Dict[str, str] = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
+    "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+    "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+    "ф": "f", "х": "h", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "sch",
+    "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya",
+}
+
+LAT_TO_CYR_MAP: Dict[str, str] = {
+    "shch": "щ", "sch": "щ", "yo": "е", "zh": "ж", "ts": "ц", "ch": "ч", "sh": "ш",
+    "yu": "ю", "ya": "я",
+    "a": "а", "b": "б", "v": "в", "w": "в", "g": "г", "d": "д", "e": "е",
+    "z": "з", "i": "и", "j": "й", "k": "к", "l": "л", "m": "м", "n": "н",
+    "o": "о", "p": "п", "r": "р", "s": "с", "t": "т", "u": "у", "f": "ф",
+    "h": "х", "c": "к", "y": "ы", "x": "х",
+}
+
+HOMOGLYPH_CYR_TO_LAT: Dict[str, str] = {
+    "а": "a", "с": "c", "е": "e", "о": "o", "р": "p", "х": "x", "у": "y",
+    "к": "k", "м": "m", "т": "t", "в": "b", "н": "h",
+}
+
+HOMOGLYPH_LAT_TO_CYR: Dict[str, str] = {
+    "a": "а", "c": "с", "e": "е", "o": "о", "p": "р", "x": "х", "y": "у",
+    "k": "к", "m": "м", "t": "т", "b": "в", "h": "н",
+}
+
+
+def transliterate_cyr_to_lat(text: str) -> str:
+    """Transliterate Cyrillic text to Latin phonetic characters."""
+    return "".join(CYR_TO_LAT_MAP.get(ch, ch) for ch in text.lower())
+
+
+def transliterate_lat_to_cyr(text: str) -> str:
+    """Transliterate Latin text to Cyrillic phonetic characters."""
+    t = text.lower()
+    for lat_multi, cyr_char in [
+        ("shch", "щ"), ("sch", "щ"), ("yo", "е"), ("zh", "ж"),
+        ("ts", "ц"), ("ch", "ч"), ("sh", "ш"), ("yu", "ю"), ("ya", "я")
+    ]:
+        t = t.replace(lat_multi, cyr_char)
+    return "".join(LAT_TO_CYR_MAP.get(ch, ch) for ch in t)
+
+
+def normalize_code_homoglyphs(code: str) -> Tuple[str, str]:
+    """Produce pure Latin-homoglyph and pure Cyrillic-homoglyph normalized forms of a code string."""
+    c_low = code.strip().lower()
+    to_lat = "".join(HOMOGLYPH_CYR_TO_LAT.get(ch, ch) for ch in c_low)
+    to_cyr = "".join(HOMOGLYPH_LAT_TO_CYR.get(ch, ch) for ch in c_low)
+    return to_lat, to_cyr
+
+
+def generate_code_variants(raw_code: str) -> Set[str]:
+    """Generate all transliterated and normalized permutations for any document or template code.
+
+    Handles novel corporate document codes (e.g., PIB-501, IT-42, SED-15, SEC-101, RKA-03, OD-184),
+    keyboard layout homoglyph mismatches (e.g., mixed Cyrillic 'Р' in 'РIB-501'),
+    and hyphen/spacing variations (e.g., 'PIB-501', 'PIB 501', 'PIB501', 'ПИБ-501', 'ПИБ501').
+    """
+    if not raw_code:
+        return set()
+
+    variants: Set[str] = set()
+    clean = raw_code.strip().lower()
+    variants.add(clean)
+    variants.add(clean.replace("-", "").replace("_", "").replace(" ", ""))
+
+    norm_lat, norm_cyr = normalize_code_homoglyphs(clean)
+    variants.add(norm_lat)
+    variants.add(norm_cyr)
+    variants.add(norm_lat.replace("-", "").replace("_", "").replace(" ", ""))
+    variants.add(norm_cyr.replace("-", "").replace("_", "").replace(" ", ""))
+
+    m = re.match(r"^([a-zа-яё0-9_\-]+?)(?:[-_ ]*(\d+))?$", clean)
+    if m:
+        prefix = m.group(1).replace("-", "").replace("_", "")
+        num = m.group(2) or ""
+
+        norm_lat_pref = normalize_code_homoglyphs(prefix)[0]
+        norm_cyr_pref = normalize_code_homoglyphs(prefix)[1]
+
+        lat_from_orig = transliterate_cyr_to_lat(prefix)
+        cyr_from_orig = transliterate_lat_to_cyr(prefix)
+        lat_from_cyr_norm = transliterate_cyr_to_lat(norm_cyr_pref)
+        cyr_from_lat_norm = transliterate_lat_to_cyr(norm_lat_pref)
+
+        all_prefixes = {
+            prefix,
+            norm_lat_pref,
+            norm_cyr_pref,
+            lat_from_orig,
+            cyr_from_orig,
+            lat_from_cyr_norm,
+            cyr_from_lat_norm,
+        }
+
+        for p in all_prefixes:
+            p_clean = p.replace("-", "").replace("_", "").strip()
+            if p_clean:
+                if num:
+                    variants.add(f"{p_clean}-{num}")
+                    variants.add(f"{p_clean}{num}")
+                    variants.add(f"{p_clean} {num}")
+                else:
+                    variants.add(p_clean)
+
+    return {v for v in variants if v}
 
 
 def get_allowed_access_levels(user_role: str) -> List[str]:
@@ -100,9 +258,14 @@ def extract_clause_identifiers(query: str) -> List[str]:
 def get_russian_stem(word: str) -> str:
     """Extract basic Russian stem for inflected match."""
     w = word.strip().lower()
-    # Strip common case endings
+    for v_ending in ("иться", "аться", "еться", "уться", "ться", "ить", "ать", "еть", "уть", "ти", "ть"):
+        if len(w) > len(v_ending) + 2 and w.endswith(v_ending):
+            w = w[:-len(v_ending)]
+            break
+    if w.endswith(("ь", "ъ")):
+        w = w[:-1]
     for ending in ("ами", "ями", "ов", "ев", "ей", "ам", "ям", "ом", "ем", "ой", "ей", "ую", "юю", "ая", "яя", "ое", "ее", "ые", "ие", "ых", "их", "ым", "им", "а", "я", "у", "ю", "о", "е", "ы", "и"):
-        if len(w) > len(ending) + 3 and w.endswith(ending):
+        if len(w) > len(ending) + 2 and w.endswith(ending):
             return w[:-len(ending)]
     return w
 
@@ -185,30 +348,73 @@ def generate_quote_excerpt(
     if len(clean_content) <= max_chars:
         return clean_content
 
-    # Try to find match index of query keywords or detected terms
-    search_tokens = []
-    if detected_terms:
-        for t in detected_terms:
-            search_tokens.append(t.canonical)
-            if len(t.expansion) < 40:
-                search_tokens.append(t.expansion)
-
-    query_words = [w for w in re.findall(r"[а-яА-ЯёЁa-zA-Z0-9]+", query) if len(w) >= 3]
-    search_tokens.extend(query_words)
-
     best_idx = -1
-    for token in search_tokens:
-        idx = clean_content.lower().find(token.lower())
-        if idx != -1:
-            best_idx = idx
-            break
+    is_role_match = False
 
-    if best_idx == -1 or best_idx < 100:
-        return clean_content[:max_chars].rstrip() + "..."
+    # For composition / role queries, prioritize role and table markers in chunk content
+    is_role_query = bool(re.search(
+        r"\b(?:рол[иейя]|состав[ае]?|структур[аыеу]|член[ыова-я]*|участник[иова-я]*|кто\s+(?:входит|включен|является)|(?:входит|входят|включает|включаются)|председател[ьяе]|руководител[ьяе]|секретар[ьяе])\b",
+        query,
+        re.I,
+    ))
+    if is_role_query:
+        role_marker_matches = [
+            clean_content.lower().find(m)
+            for m in (
+                "роль в комитете",
+                "установленный состав и роли",
+                "состав комитета",
+                "председатель комитета",
+                "руководитель рабочей группы",
+                "состав группы аудита",
+                "роль | должность",
+            )
+            if clean_content.lower().find(m) != -1
+        ]
+        if role_marker_matches:
+            best_idx = min(role_marker_matches)
+            is_role_match = True
 
-    start = max(0, best_idx - 100)
+    if best_idx == -1:
+        # Try to find match index of query keywords or detected terms
+        search_tokens = []
+        if detected_terms:
+            for t in detected_terms:
+                search_tokens.append(t.canonical)
+                if len(t.expansion) < 40:
+                    search_tokens.append(t.expansion)
+
+        query_words = [w for w in re.findall(r"[а-яА-ЯёЁa-zA-Z0-9]+", query) if len(w) >= 3]
+        search_tokens.extend(query_words)
+        for w in query_words:
+            if len(w) >= 4 and not w[0].isdigit():
+                stem = get_russian_stem(w)
+                if stem not in search_tokens:
+                    search_tokens.append(stem)
+
+        for token in search_tokens:
+            idx = clean_content.lower().find(token.lower())
+            if idx != -1:
+                best_idx = idx
+                break
+
+    if best_idx == -1:
+        clean_lead = re.sub(r"_{3,}", "____", clean_content[:max_chars]).rstrip()
+        return clean_lead + ("..." if len(clean_content) > max_chars else "")
+
+    if is_role_match:
+        start = best_idx
+    elif best_idx < 100:
+        start = 0
+    else:
+        start = max(0, best_idx - 100)
+
     end = min(len(clean_content), start + max_chars)
     excerpt = clean_content[start:end].strip()
+    # Clean leading orphaned punctuation/commas
+    excerpt = re.sub(r"^(?:[,\.;:—\-\s]+)", "", excerpt)
+    # Collapse multiple underscores
+    excerpt = re.sub(r"_{3,}", "____", excerpt)
     prefix = "..." if start > 0 else ""
     suffix = "..." if end < len(clean_content) else ""
     return f"{prefix}{excerpt}{suffix}"
@@ -312,12 +518,14 @@ def calculate_relevance_pct(
         ]
     if not all_query_words:
         all_query_words = [w for w in re.findall(r"[а-яА-ЯёЁa-zA-Z0-9]+", query.lower()) if len(w) >= 3]
-    content_lower = chunk_content.lower()
-    matched_words = [
-        w
-        for w in all_query_words
-        if re.search(rf"(?<![а-яА-ЯёЁa-zA-Z0-9]){re.escape(get_russian_stem(w))}", content_lower)
-    ]
+    content_lower = f"{doc_code} {chunk_clause} {chunk_content}".lower()
+    matched_words = []
+    for w in all_query_words:
+        stems_to_try = [get_russian_stem(w)]
+        if w in SLANG_SYNONYMS:
+            stems_to_try.append(get_russian_stem(SLANG_SYNONYMS[w]))
+        if any(re.search(rf"(?<![а-яА-ЯёЁa-zA-Z0-9]){re.escape(st)}", content_lower) for st in stems_to_try):
+            matched_words.append(w)
     raw_coverage = len(matched_words) / len(all_query_words) if all_query_words else 0.0
 
     # For deep/multi-aspect queries (2+ sentences or 6+ domain words), prevent coverage dilution
@@ -405,16 +613,52 @@ def calculate_relevance_pct(
     if len(query_clean) >= 4 and query_clean in content_lower:
         score += 20.0
 
-    # 7. Document code or template registration number match (e.g., OD-184, УТВ-01, MOD-ORDER-IS)
-    if doc_code and doc_code.lower() == query_clean:
-        score += 65.0
-    elif doc_code and doc_code.lower() in query_clean:
-        score += 35.0
+    # 7. Document code or template registration number match (e.g., OD-184, УТВ-01, MOD-ORDER-IS, PIB-501, IT-42, SEC-101)
+    is_code_match = False
+    if doc_code:
+        doc_variants = generate_code_variants(doc_code)
+        query_code_variants: Set[str] = set()
+        for cm in re.finditer(r"\b([a-zA-Zа-яА-ЯёЁ]{1,10})[-_ ]*(\d+)\b", query):
+            query_code_variants.update(generate_code_variants(cm.group(0)))
+
+        q_norm_lat, q_norm_cyr = normalize_code_homoglyphs(query_clean)
+
+        if (
+            query_clean in doc_variants
+            or bool(doc_variants & query_code_variants)
+            or any(
+                re.search(rf"\b{re.escape(v)}\b", query_clean)
+                or re.search(rf"\b{re.escape(v)}\b", q_norm_lat)
+                or re.search(rf"\b{re.escape(v)}\b", q_norm_cyr)
+                for v in doc_variants
+            )
+            or any(
+                re.search(rf"\b{re.escape(v.replace('-', ''))}\b", query_clean.replace("-", ""))
+                for v in doc_variants
+            )
+        ):
+            is_code_match = True
+            score += 65.0 if query_clean in doc_variants else 50.0
 
     if chunk_reg_number and chunk_reg_number.lower() == query_clean:
         score += 65.0
     elif chunk_reg_number and chunk_reg_number.lower() in query_clean:
         score += 35.0
+
+    # 8. Calibration: prevent artificial saturation to 100% on partial matches
+    is_fully_grounded = (
+        is_exact_clause
+        or (doc_code and doc_code.lower() == query_clean)
+        or is_code_match
+        or (chunk_reg_number and chunk_reg_number.lower() == query_clean)
+        or (coverage >= 0.95 and has_multi_match and (ts_rank_exact > 0.05 or bm25_norm > 0.4))
+    )
+
+    if not is_fully_grounded:
+        if score > 75.0:
+            score = 75.0
+        elif score >= 35.0 and has_multi_match and coverage >= 0.4:
+            score = 45.0 + ((score - 35.0) / 40.0) * 30.0
 
     # Cap strictly between 0.0 and 100.0, round to 1 decimal
     final_relevance = max(0.0, min(100.0, score))
@@ -436,8 +680,27 @@ async def retrieve_chunks(
     expanded_query = clean_query
     q_low = clean_query.lower()
     for trigger_phrase, expansion_str in DOU_QUERY_EXPANSIONS.items():
-        if trigger_phrase in q_low:
-            expanded_query = f"{expanded_query} {expansion_str}"
+        if len(trigger_phrase) <= 3:
+            if re.search(rf"\b{re.escape(trigger_phrase)}\b", q_low):
+                expanded_query = f"{expanded_query} {expansion_str}"
+        else:
+            if re.search(rf"\b{re.escape(trigger_phrase)}", q_low):
+                expanded_query = f"{expanded_query} {expansion_str}"
+
+    for slang, standard in SLANG_SYNONYMS.items():
+        if re.search(rf"\b{re.escape(slang)}\b", q_low):
+            expanded_query = f"{expanded_query} {standard}"
+
+    query_code_candidates: Set[str] = set()
+    # Expand novel document code variants generically (Cyrillic <-> Latin, homoglyphs, with/without hyphen)
+    for cm in re.finditer(r"\b([a-zA-Zа-яА-ЯёЁ]{1,10})[-_ ]*(\d+)\b", clean_query):
+        code_token = cm.group(0)
+        variants = generate_code_variants(code_token)
+        for var in variants:
+            if var not in expanded_query.lower():
+                expanded_query = f"{expanded_query} {var}"
+            query_code_candidates.add(var.lower())
+            query_code_candidates.add(var.lower().replace("-", "").replace("_", "").replace(" ", ""))
 
     clause_candidates = extract_clause_identifiers(expanded_query)
     allowed_levels = get_allowed_access_levels(user_role)
@@ -449,20 +712,22 @@ async def retrieve_chunks(
         if dt.expansion and dt.expansion.lower() not in expanded_query.lower():
             expanded_query = f"{expanded_query} {dt.expansion}"
 
-    # Construct broad OR query for websearch_to_tsquery
+    # Construct broad OR query for websearch_to_tsquery (filtering stopwords & conversational fillers)
+    all_stop_and_filler = RUSSIAN_STOPWORDS | CONVERSATIONAL_FILLER_WORDS
     significant_words = [
         w for w in re.findall(r"[а-яА-ЯёЁa-zA-Z0-9]+", expanded_query)
-        if len(w) >= 2 and w.lower() not in RUSSIAN_STOPWORDS
+        if len(w) >= 2 and w.lower() not in all_stop_and_filler
     ]
     if not significant_words:
         significant_words = [
             w for w in re.findall(r"[а-яА-ЯёЁa-zA-Z0-9]+", clean_query)
-            if len(w) >= 2
+            if len(w) >= 2 and w.lower() not in RUSSIAN_STOPWORDS
         ]
     or_query = " OR ".join(significant_words) if significant_words else clean_query
 
-    # Clause match candidate list for SQL ANY parameter
+    # Clause and code match candidate lists for SQL ANY parameters
     clause_param = clause_candidates if clause_candidates else ["__NO_CLAUSE__"]
+    code_param = list(query_code_candidates) if query_code_candidates else ["__NO_CODE__"]
 
     sql = text("""
         SELECT 
@@ -496,6 +761,8 @@ async def retrieve_chunks(
               (websearch_to_tsquery('russian', :query)::text <> '' AND c.search_vector @@ websearch_to_tsquery('russian', :query))
               OR (websearch_to_tsquery('russian', :or_query)::text <> '' AND c.search_vector @@ websearch_to_tsquery('russian', :or_query))
               OR c.clause = ANY(:clause_candidates)
+              OR lower(d.doc_code) = ANY(:code_candidates)
+              OR lower(replace(d.doc_code, '-', '')) = ANY(:code_candidates)
               OR c.clause ILIKE :like_query
               OR c.content ILIKE :like_query
               OR c.chapter ILIKE :like_query
@@ -507,6 +774,7 @@ async def retrieve_chunks(
           )
         ORDER BY 
             (CASE WHEN c.clause = ANY(:clause_candidates) THEN 100.0 ELSE 0.0 END) DESC,
+            (CASE WHEN lower(d.doc_code) = ANY(:code_candidates) THEN 80.0 ELSE 0.0 END) DESC,
             ts_rank_exact DESC, 
             ts_rank_or DESC, 
             c.page_number ASC
@@ -522,6 +790,7 @@ async def retrieve_chunks(
             "like_query": f"%{clean_query}%",
             "allowed_levels": allowed_levels,
             "clause_candidates": clause_param,
+            "code_candidates": code_param,
         },
     )
 

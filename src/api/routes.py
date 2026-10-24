@@ -65,6 +65,7 @@ from src.schemas.api_models import (
     ProjectCardItem,
     QueryRequest,
     QueryResponse,
+    SwitchVersionRequest,
     TemplateModuleInfo,
     TokenRequest,
     TokenResponse,
@@ -529,10 +530,12 @@ async def upload_version(
         )
 
     clean_access = access_level.strip().lower()
-    if clean_access not in ["public", "dsp", "confidential", "secret"]:
+    if clean_access in ("internal", "дсп", "для служебного пользования"):
+        clean_access = "dsp"
+    elif clean_access not in ["public", "dsp", "confidential", "secret"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid access_level '{access_level}'. Allowed: public, dsp, confidential, secret.",
+            detail=f"Invalid access_level '{access_level}'. Allowed: public, dsp, internal, confidential, secret.",
         )
 
     try:
@@ -647,6 +650,53 @@ async def switch_document_version(
         chunk_count=int(chunk_count),
         created_at=target_doc.created_at,
         updated_at=target_doc.updated_at,
+    )
+
+
+@router.post(
+    "/documents/{doc_code}/switch-version/{version}",
+    response_model=DocumentVersionItem,
+    status_code=status.HTTP_200_OK,
+    summary="Switch or rollback active document version (path parameter alias)",
+    description="Sets selected version to is_active=True and all other versions to is_active=False. Requires dou_specialist or admin.",
+)
+async def switch_document_version_path(
+    doc_code: str,
+    version: str,
+    raw_request: Request,
+    current_user: UserContext = Depends(require_role(["dou_specialist", "admin"])),
+    session: AsyncSession = Depends(get_db),
+) -> DocumentVersionItem:
+    """Activate specified version for a regulatory document (switch-version alias)."""
+    return await switch_document_version(
+        doc_code=doc_code,
+        version=version,
+        raw_request=raw_request,
+        current_user=current_user,
+        session=session,
+    )
+
+
+@router.post(
+    "/documents/switch-version",
+    response_model=DocumentVersionItem,
+    status_code=status.HTTP_200_OK,
+    summary="Switch or rollback active document version (JSON body)",
+    description="Sets selected version to is_active=True and all other versions to is_active=False. Requires dou_specialist or admin.",
+)
+async def switch_document_version_body(
+    payload: SwitchVersionRequest,
+    raw_request: Request,
+    current_user: UserContext = Depends(require_role(["dou_specialist", "admin"])),
+    session: AsyncSession = Depends(get_db),
+) -> DocumentVersionItem:
+    """Activate specified version for a regulatory document using JSON request payload."""
+    return await switch_document_version(
+        doc_code=payload.doc_code,
+        version=payload.version,
+        raw_request=raw_request,
+        current_user=current_user,
+        session=session,
     )
 
 

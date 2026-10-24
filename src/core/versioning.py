@@ -85,30 +85,15 @@ def parse_uploaded_document(
 
             for p_idx in range(len(doc)):
                 page_num = p_idx + 1
-                page_text = doc[p_idx].get_text().replace("\xa0", " ")
+                page_text = doc[p_idx].get_text().replace("\xa0", " ").replace("\xad", "-")
                 lines = [clean_pdf_text_line(l) for l in page_text.split("\n")]
                 lines = [l for l in lines if l]
 
                 for line in lines:
-                    m_chap = re.match(r"^(?:Глава|Раздел)\s+(\d+)\.?\s*(.*)", line, re.I)
-                    m_cl = re.match(r"^(\d+\.\d+(?:\.\d+)*)\.?\s*(.*)", line)
+                    m_chap = re.match(r"^(?:Глава|Раздел|Статья|[1-9]\d*\.)\s*(\d+)?\.?\s*(.*)", line, re.I)
+                    m_cl = re.match(r"^(?:(?:п\.|пп\.|пункт)\s*)?(\d+\.\d+(?:\.\d+)*)\.?\s*(.*)", line, re.I)
 
-                    if m_chap:
-                        if current_lines:
-                            chunks.append(
-                                ExtractedChunk(
-                                    chapter=current_chapter,
-                                    clause=current_clause,
-                                    page_number=current_page,
-                                    content="\n".join(current_lines),
-                                    metadata={"doc_code": doc_code, "version": version, "clause": current_clause},
-                                )
-                            )
-                            current_lines = []
-                        current_chapter = line
-                        current_clause = f"{m_chap.group(1)}.0"
-                        current_page = page_num
-                    elif m_cl:
+                    if m_cl:
                         if current_lines:
                             chunks.append(
                                 ExtractedChunk(
@@ -123,6 +108,22 @@ def parse_uploaded_document(
                         current_clause = m_cl.group(1)
                         current_page = page_num
                         current_lines.append(line)
+                    elif m_chap:
+                        if current_lines:
+                            chunks.append(
+                                ExtractedChunk(
+                                    chapter=current_chapter,
+                                    clause=current_clause,
+                                    page_number=current_page,
+                                    content="\n".join(current_lines),
+                                    metadata={"doc_code": doc_code, "version": version, "clause": current_clause},
+                                )
+                            )
+                            current_lines = []
+                        current_chapter = line
+                        ch_num = m_chap.group(1) if m_chap.group(1) else "1"
+                        current_clause = f"{ch_num}.0"
+                        current_page = page_num
                     else:
                         current_lines.append(line)
 
@@ -167,8 +168,8 @@ def parse_uploaded_document(
             if not text:
                 continue
 
-            m_chap = re.match(r"^(?:Глава|Раздел|[1-9]\d*\.)\s+(.*)", text, re.I)
-            m_cl = re.match(r"^(\d+\.\d+(?:\.\d+)*)\.?\s*(.*)", text)
+            m_chap = re.match(r"^(?:Глава|Раздел|Статья|[1-9]\d*\.)\s*(\d+)?\.?\s*(.*)", text, re.I)
+            m_cl = re.match(r"^(?:(?:п\.|пп\.|пункт)\s*)?(\d+\.\d+(?:\.\d+)*)\.?\s*(.*)", text, re.I)
 
             if m_cl:
                 if current_lines:
@@ -197,6 +198,8 @@ def parse_uploaded_document(
                     )
                     current_lines = []
                 current_chapter = text
+                ch_num = m_chap.group(1) if m_chap.group(1) else "1"
+                current_clause = f"{ch_num}.0"
             else:
                 current_lines.append(text)
 
@@ -222,17 +225,9 @@ def parse_uploaded_document(
                 )
             )
 
-    # Fallback to guaranteed chunk if document body was freeform
-    if not chunks:
-        chunks.append(
-            ExtractedChunk(
-                chapter="Общие положения",
-                clause="1.1",
-                page_number=1,
-                content=f"{title}. Версия регламента {version}.",
-                metadata={"doc_code": doc_code, "version": version, "clause": "1.1"},
-            )
-        )
+    has_text = any(bool(c.content.strip()) for c in chunks)
+    if not has_text:
+        raise ValueError("Uploaded document contains no extractable text or content.")
 
     return ExtractedDocument(
         doc_code=doc_code,
@@ -265,6 +260,8 @@ async def upload_document_version(
     clean_title = title.strip()
     clean_type = doc_type.strip()
     clean_access = access_level.strip().lower()
+    if clean_access in ("internal", "дсп", "для служебного пользования"):
+        clean_access = "dsp"
 
     safe_filename = Path(file_name).name
     target_path = UPLOADS_DIR / f"{clean_code}_v{clean_version}_{safe_filename}"

@@ -174,6 +174,7 @@ export interface ComplianceCheckResponse {
   info_count: number;
   issues: ComplianceIssue[];
   approval_recommendation?: ApprovalRecommendation | null;
+  fixed_file_url?: string | null;
   checked_at: string;
 }
 

@@ -189,6 +189,12 @@ class DocumentVersionItem(BaseModel):
     updated_at: datetime
 
 
+class SwitchVersionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    doc_code: str = Field(..., description="Document identifier code")
+    version: str = Field(..., description="Version identifier to activate")
+
+
 class AuditLogItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str
@@ -244,5 +250,6 @@ class ComplianceCheckResponse(BaseModel):
     info_count: int = 0
     issues: List[ComplianceIssue]
     approval_recommendation: Optional[ApprovalRecommendation] = None
+    fixed_file_url: Optional[str] = None
     checked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

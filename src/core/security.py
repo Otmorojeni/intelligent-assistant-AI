@@ -101,6 +101,8 @@ def check_document_access(user_role: str, doc_access_level: str) -> bool:
     norm_role = normalize_role(user_role)
     allowed = ROLE_PERMISSIONS.get(norm_role, {AccessLevel.PUBLIC.value})
     target_level = (doc_access_level or AccessLevel.PUBLIC.value).strip().lower()
+    if target_level in ("internal", "дсп", "для служебного пользования"):
+        target_level = AccessLevel.DSP.value
     return target_level in allowed
 
 

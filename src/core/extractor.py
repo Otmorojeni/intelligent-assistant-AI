@@ -105,7 +105,7 @@ def normalize_unicode(text: str) -> str:
 
 def clean_pdf_text_line(line: str) -> Optional[str]:
     """Clean and filter out watermarks or empty lines."""
-    line_clean = line.strip()
+    line_clean = line.replace("\xa0", " ").strip()
     if not line_clean:
         return None
     if line_clean == WATERMARK_TEXT or WATERMARK_TEXT in line_clean:
@@ -1524,17 +1524,34 @@ def extract_template_modules(materials_dir: Path) -> List[TemplateModuleDTO]:
         sha256 = compute_file_hash(file_path)
         doc = docx.Document(file_path)
 
-        # Extract text chunks from template paragraphs and tables
-        text_lines = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
-        for tbl in doc.tables:
-            for row in tbl.rows:
-                row_cells: List[str] = []
-                for cell in row.cells:
-                    cell_text = cell.text.strip()
-                    if cell_text and (not row_cells or row_cells[-1] != cell_text):
-                        row_cells.append(cell_text)
-                if row_cells:
-                    text_lines.append(" | ".join(row_cells))
+        # Extract text chunks from template paragraphs and tables in document body order
+        text_lines: List[str] = []
+        for child in doc.element.body:
+            if child.tag.endswith("p"):
+                p_obj = docx.text.paragraph.Paragraph(child, doc)
+                p_text = p_obj.text.strip()
+                if p_text:
+                    text_lines.append(p_text)
+            elif child.tag.endswith("tbl"):
+                tbl_obj = docx.table.Table(child, doc)
+                for row in tbl_obj.rows:
+                    row_cells: List[str] = []
+                    for cell in row.cells:
+                        cell_text = cell.text.strip()
+                        if cell_text and (not row_cells or row_cells[-1] != cell_text):
+                            row_cells.append(cell_text)
+                    if row_cells:
+                        text_lines.append(" | ".join(row_cells))
+
+        # Explicit role / composition schema summary for indexing and searchability
+        role_labels = [
+            f["label"]
+            for f in cfg.get("fields", [])
+            if any(k in f.get("name", "").lower() for k in ("chair", "leader", "secreta", "member", "lead", "team"))
+        ]
+        if role_labels:
+            text_lines.append(f"Установленный состав и роли: {', '.join(role_labels)}.")
+
         full_text = "\n".join(text_lines)
 
         chunk = ExtractedChunk(

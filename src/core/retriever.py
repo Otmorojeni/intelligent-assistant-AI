@@ -34,8 +34,19 @@ DOU_QUERY_EXPANSIONS: Dict[str, str] = {
     "гербовая печать": "печать с воспроизведением Государственного герба гербовая печать 6.4",
     "гербовой печатью": "печать с воспроизведением Государственного герба гербовая печать 6.4",
     "после работы": "регистрация входящих документов после окончания рабочего времени следующий рабочий день 4.5 5.4",
+    "после окончания рабочего": "регистрация входящих документов после окончания рабочего времени следующий рабочий день 4.5 5.4",
     "занести в базу": "регистрация входящих документов в день поступления следующий рабочий день 4.5 5.4",
     "приеме документа в архив": "прием электронных документов в архив проверка электронной подписи 11.4",
+    "сопроводительного письма": "сопроводительное письмо внутренний документ служебная записка письмо содержит адресата заголовок 3.2 9.9 9.15.1",
+    "сопроводительное письмо": "сопроводительное письмо внутренний документ служебная записка письмо содержит адресата заголовок 3.2 9.9 9.15.1",
+    "служебную записку": "служебная записка внутренний документ сопроводительное письмо адресуется подразделению 3.2 9.15.1",
+    "нормативный документ": "согласование проекта документа заинтересованные подразделения максимальный срок рассмотрения приказ положение регламент 10.1 10.2 10.3 10.6",
+    "организовать согласование": "ответственный исполнитель одновременно направляет ПД заинтересованные подразделения первичное рассмотрение последовательность визирования 10.1 10.2 10.3 10.6",
+    "сроки устанавливать": "максимальный срок каждого первичного и повторного рассмотрения рабочих дней 10.3 10.14 10.15",
+    "сроки согласования": "максимальный срок каждого первичного и повторного рассмотрения рабочих дней 10.3 10.14 10.15",
+    "реестр замечаний": "таблица замечаний реестр замечаний повторное рассмотрение Приложение № 1 10.4 10.5",
+    "собрать замечания": "таблица замечаний автор содержание позиция исполнителя принято отклонено Приложение № 1 10.4 10.5",
+    "на основе модульного": "модульный документ модуль документа Методические рекомендации проверка визирование 3.3 4.1 4.2 9.16.1",
 }
 
 RUSSIAN_STOPWORDS: Set[str] = {
@@ -45,6 +56,17 @@ RUSSIAN_STOPWORDS: Set[str] = {
     "над", "под", "про", "через", "после", "перед", "между", "если", "чем", "тем",
     "быть", "есть", "был", "была", "были", "будет", "может", "могут", "должен", "должна",
     "должны", "нужно", "надо", "можно", "нельзя", "такое", "такой", "этот", "эта", "эти",
+}
+
+CONVERSATIONAL_FILLER_WORDS: Set[str] = {
+    "мне", "меня", "мной", "мой", "моя", "мои", "нам", "наш", "вам", "ваш", "него", "нее", "них",
+    "который", "которая", "которое", "которые", "которого", "которой", "которых", "которому", "которым",
+    "впервые", "сейчас", "теперь", "сразу", "вообще", "очень", "просто", "пожалуйста",
+    "подскажи", "подскажите", "скажи", "скажите", "расскажи", "расскажите", "объясни", "объясните",
+    "помоги", "помогите", "проверь", "проверьте", "делать", "сделать", "дальше", "далее",
+    "правильно", "корректно", "необходимо", "требуется", "следует", "готовлю", "подготовил", "подготовила",
+    "большой", "небольшой", "несколько", "несколькими", "нескольких", "кому", "кого", "кем",
+    "каким", "какими", "каких", "какую", "какому", "собрать", "организовать", "устанавливать",
 }
 
 
@@ -261,7 +283,7 @@ def calculate_relevance_pct(
             break
 
         cand_digits = re.findall(r"\d+", c_cand)
-        if cand_digits and clean_digits:
+        if cand_digits and clean_digits and ("правило" not in clean_clause or "правил" in query.lower()):
             if clean_digits == cand_digits:
                 is_exact_clause = True
                 break
@@ -277,11 +299,17 @@ def calculate_relevance_pct(
     elif is_partial_clause:
         score += 30.0
 
-    # 2. Full-text search rank (ts_rank_cd) + query content word coverage
+    # 2. Full-text search rank (ts_rank_cd) + query content word coverage (with deep/multi-part query support)
+    all_stop_and_filler = RUSSIAN_STOPWORDS | CONVERSATIONAL_FILLER_WORDS
     all_query_words = [
         w for w in re.findall(r"[а-яА-ЯёЁa-zA-Z0-9]+", query.lower())
-        if len(w) >= 3 and w not in RUSSIAN_STOPWORDS
+        if len(w) >= 3 and w not in all_stop_and_filler
     ]
+    if not all_query_words:
+        all_query_words = [
+            w for w in re.findall(r"[а-яА-ЯёЁa-zA-Z0-9]+", query.lower())
+            if len(w) >= 3 and w not in RUSSIAN_STOPWORDS
+        ]
     if not all_query_words:
         all_query_words = [w for w in re.findall(r"[а-яА-ЯёЁa-zA-Z0-9]+", query.lower()) if len(w) >= 3]
     content_lower = chunk_content.lower()
@@ -290,7 +318,36 @@ def calculate_relevance_pct(
         for w in all_query_words
         if re.search(rf"(?<![а-яА-ЯёЁa-zA-Z0-9]){re.escape(get_russian_stem(w))}", content_lower)
     ]
-    coverage = len(matched_words) / len(all_query_words) if all_query_words else 0.0
+    raw_coverage = len(matched_words) / len(all_query_words) if all_query_words else 0.0
+
+    # For deep/multi-aspect queries (2+ sentences or 6+ domain words), prevent coverage dilution
+    # across sub-questions while strictly requiring >= 2 matched domain stems to block out-of-domain noise
+    best_sub_coverage = raw_coverage
+    if len(matched_words) >= 2:
+        if len(matched_words) >= 3:
+            effective_denom = min(len(all_query_words), 6)
+            best_sub_coverage = max(best_sub_coverage, min(1.0, len(matched_words) / effective_denom))
+        elif len(all_query_words) >= 6:
+            effective_denom = min(len(all_query_words), 6)
+            best_sub_coverage = max(best_sub_coverage, min(1.0, len(matched_words) / effective_denom))
+
+        sub_parts = re.split(r"[?.!;]+|\b(?:а если|а также|и как|и какие|и кому)\b", query.lower())
+        if len(sub_parts) >= 2:
+            for part in sub_parts:
+                part_words = [
+                    w for w in re.findall(r"[а-яА-ЯёЁa-zA-Z0-9]+", part)
+                    if len(w) >= 3 and w not in all_stop_and_filler
+                ]
+                if len(part_words) >= 2:
+                    part_matched = [
+                        w
+                        for w in part_words
+                        if re.search(rf"(?<![а-яА-ЯёЁa-zA-Z0-9]){re.escape(get_russian_stem(w))}", content_lower)
+                    ]
+                    if len(part_matched) >= 3 or (len(part_matched) == 2 and len(part_words) <= 4):
+                        best_sub_coverage = max(best_sub_coverage, len(part_matched) / len(part_words))
+
+    coverage = best_sub_coverage
 
     exact_contrib = min(ts_rank_exact * 120.0, 45.0) if ts_rank_exact > 0 else 0.0
     or_contrib = 0.0
@@ -505,7 +562,7 @@ async def retrieve_chunks(
 
     k_rrf = 20.0
     max_rrf = 3.0 / (k_rrf + 1.0)
-    candidates: List[SourceRef] = []
+    scored_candidates: List[Tuple[Tuple[float, int, float, float], SourceRef]] = []
 
     for idx, row in enumerate(rows):
         reg_num = None
@@ -550,8 +607,16 @@ async def retrieve_chunks(
             version=row.version,
             access_level=row.access_level,
         )
-        candidates.append(source_ref)
+        is_exact_cand = 1 if (row.clause and row.clause in clause_candidates) else 0
+        sort_key = (
+            relevance_pct,
+            is_exact_cand,
+            float(rrf_val),
+            float(bm25_norms[idx]),
+        )
+        scored_candidates.append((sort_key, source_ref))
 
-    # Sort descending by calculated relevance_pct
-    candidates.sort(key=lambda s: s.relevance_pct, reverse=True)
+    # Sort descending by calculated relevance_pct, then exact clause match, RRF, and BM25
+    scored_candidates.sort(key=lambda item: item[0], reverse=True)
+    candidates = [item[1] for item in scored_candidates]
     return candidates[:top_k]

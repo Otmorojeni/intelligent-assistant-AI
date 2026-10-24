@@ -514,7 +514,9 @@ def resolve_matching_rule(
         return rule, notes, False
 
     # 2.6 Internal audit disposition -> Rule 9 (template УТВ-05)
-    if any(code in clean_doc for code in ("mod-disp-audit", "утв-05", "disp_audit", "аудит", "проверк")):
+    if any(code in clean_doc for code in ("mod-disp-audit", "утв-05", "disp_audit", "аудит")) or (
+        "проверк" in clean_doc and not is_order
+    ):
         rule = rules_by_number.get(9) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[8])
         return rule, notes, True
 
@@ -524,8 +526,8 @@ def resolve_matching_rule(
     ):
         rule = rules_by_number.get(5) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[4])
         return rule, notes, True
-    if any(code in clean_doc for code in ("mod-order-lna", "утв-04", "order_lna", "локальн", "лна", "регламент", "положени", "инструкци")) or (
-        is_order and bool(re.search(r"\bлна\b", clean_doc))
+    if any(code in clean_doc for code in ("mod-order-lna", "утв-04", "order_lna", "локальн", "лна", "нормативн", "регламент", "положени", "инструкци")) or (
+        is_order and (bool(re.search(r"\bлна\b", clean_doc)) or "модульн" in clean_doc)
     ):
         rule = rules_by_number.get(5) or _create_fallback_rule(CANONICAL_FALLBACK_RULES[4])
         return rule, notes, True
@@ -955,6 +957,14 @@ APPROVAL_QUERY_TRIGGERS = (
     "этапы визирования",
     "регламент визирования",
     "регламент согласования",
+    "подготовить приказ",
+    "подготовил приказ",
+    "подготовила приказ",
+    "оформить приказ",
+    "издать приказ",
+    "подготовить распоряжение",
+    "подготовил распоряжение",
+    "оформить распоряжение",
 )
 
 _APPROVAL_WORD_RE = re.compile(

@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     LLM_TIMEOUT_SECONDS: float = 45.0
     LLM_NUM_CTX: int = 2048
     LLM_NUM_PREDICT: int = 450
-    LLM_NUM_THREAD: int = 2
+    LLM_NUM_THREAD: int = 4
     LLM_KEEP_ALIVE: str = "24h"
 
     # Application & Server

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Check, ChevronDown, Shield } from "lucide-react";
+import { Check, ChevronDown, LogOut, Shield } from "lucide-react";
 import { ROLE_METADATA, useAuth } from "../../context/AuthContext";
 import { ScreenId, UserRole } from "../../types/api";
 
@@ -19,7 +19,7 @@ const SCREEN_TITLES: Record<ScreenId, string> = {
 };
 
 export const Header: React.FC<HeaderProps> = ({ activeScreen }) => {
-  const { role, health, isSwitchingRole, switchRole } = useAuth();
+  const { role, health, isSwitchingRole, switchRole, logout } = useAuth();
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   const currentRoleMeta = ROLE_METADATA[role];
@@ -65,7 +65,7 @@ export const Header: React.FC<HeaderProps> = ({ activeScreen }) => {
                 <button
                   key={r}
                   onClick={() => {
-                    void switchRole(r);
+                    void switchRole(r, r === "admin" ? "cdo-admin-2026" : undefined);
                     setDropdownOpen(false);
                   }}
                   className={`w-full text-left p-2.5 rounded-xl transition flex items-center justify-between gap-2 ${
@@ -82,6 +82,18 @@ export const Header: React.FC<HeaderProps> = ({ activeScreen }) => {
                 </button>
               );
             })}
+            <div className="border-t border-white/[0.08] my-1" />
+            <button
+              type="button"
+              onClick={() => {
+                setDropdownOpen(false);
+                logout();
+              }}
+              className="w-full text-left p-2 rounded-xl transition flex items-center gap-2 text-rose-300 hover:bg-rose-500/10 text-xs font-medium"
+            >
+              <LogOut className="w-3.5 h-3.5 text-[#C50337] shrink-0" />
+              <span>Выйти из системы</span>
+            </button>
           </div>
         )}
       </div>

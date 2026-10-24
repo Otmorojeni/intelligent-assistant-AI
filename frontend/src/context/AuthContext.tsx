@@ -47,21 +47,74 @@ export const ROLE_METADATA: Record<UserRole, RoleMeta> = {
 };
 
 interface AuthContextValue {
+  isAuthenticated: boolean;
   role: UserRole;
   username: string;
   token: string | null;
   health: HealthResponse | null;
   isSwitchingRole: boolean;
-  switchRole: (targetRole: UserRole) => Promise<void>;
+  login: (credentials: { role: UserRole; username: string; password?: string }) => Promise<void>;
+  logout: () => void;
+  switchRole: (targetRole: UserRole, password?: string) => Promise<void>;
   refreshHealth: () => Promise<void>;
+}
+
+const AUTH_STORAGE_KEY = "cdo_auth_session_v2";
+
+interface StoredSession {
+  token: string;
+  role: UserRole;
+  username: string;
+}
+
+function isTokenExpired(token: string): boolean {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return false;
+    const payload = JSON.parse(atob(parts[1]));
+    if (!payload.exp) return false;
+    return Date.now() >= payload.exp * 1000;
+  } catch {
+    return false;
+  }
+}
+
+function loadStoredSession(): StoredSession | null {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !parsed.token) return null;
+    if (isTokenExpired(parsed.token)) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      return null;
+    }
+    return parsed as StoredSession;
+  } catch {
+    return null;
+  }
+}
+
+function saveStoredSession(session: StoredSession | null) {
+  try {
+    if (session) {
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+    } else {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+    }
+  } catch {
+    // ignore quota errors
+  }
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [role, setRole] = useState<UserRole>("employee");
-  const [username, setUsername] = useState<string>("Сотрудник ЦДО");
-  const [token, setToken] = useState<string | null>(null);
+  const initialSession = loadStoredSession();
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !!initialSession);
+  const [role, setRole] = useState<UserRole>(() => initialSession?.role || "employee");
+  const [username, setUsername] = useState<string>(() => initialSession?.username || "Сотрудник ЦДО");
+  const [token, setToken] = useState<string | null>(() => initialSession?.token || null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [isSwitchingRole, setIsSwitchingRole] = useState<boolean>(false);
 
@@ -80,40 +133,112 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const switchRole = useCallback(async (targetRole: UserRole) => {
-    setIsSwitchingRole(true);
-    try {
-      const roleTitle = ROLE_METADATA[targetRole].shortLabel;
-      const res = await issueRoleToken(targetRole, roleTitle);
-      setRole(targetRole);
-      setUsername(res.username);
-      setToken(res.access_token);
-    } catch {
-      // Fallback if backend is warming up
-      setRole(targetRole);
-      setUsername(`Демо (${ROLE_METADATA[targetRole].shortLabel})`);
-    } finally {
-      setIsSwitchingRole(false);
-    }
+  const login = useCallback(
+    async (credentials: { role: UserRole; username: string; password?: string }) => {
+      setIsSwitchingRole(true);
+      try {
+        const cleanUser = credentials.username.trim() || ROLE_METADATA[credentials.role].label;
+        const res = await issueRoleToken(credentials.role, cleanUser, credentials.password);
+        setRole(credentials.role);
+        setUsername(res.username);
+        setToken(res.access_token);
+        setIsAuthenticated(true);
+        saveStoredSession({
+          token: res.access_token,
+          role: credentials.role,
+          username: res.username,
+        });
+      } catch (err: any) {
+        if (err?.status === 401) {
+          throw new Error("Неверный пароль администратора. Для демо-доступа используйте: cdo-admin-2026");
+        }
+        // Graceful offline demo fallback if backend is unreachable
+        if (err?.name === "TypeError" || !err?.status) {
+          const fallbackUser = `${credentials.username.trim() || ROLE_METADATA[credentials.role].shortLabel} (Офлайн-демо)`;
+          const dummyToken = "offline-demo-token";
+          setRole(credentials.role);
+          setUsername(fallbackUser);
+          setToken(dummyToken);
+          setIsAuthenticated(true);
+          saveStoredSession({
+            token: dummyToken,
+            role: credentials.role,
+            username: fallbackUser,
+          });
+          return;
+        }
+        throw err;
+      } finally {
+        setIsSwitchingRole(false);
+      }
+    },
+    []
+  );
+
+  const logout = useCallback(() => {
+    saveStoredSession(null);
+    setToken(null);
+    setIsAuthenticated(false);
+    setRole("employee");
+    setUsername("Сотрудник ЦДО");
   }, []);
+
+  const switchRole = useCallback(
+    async (targetRole: UserRole, password?: string) => {
+      setIsSwitchingRole(true);
+      try {
+        const roleMeta = ROLE_METADATA[targetRole];
+        const baseName = username.replace(/\s*\([^)]*\)$/, "").trim() || roleMeta.shortLabel;
+        const finalPassword = password !== undefined ? password : targetRole === "admin" ? "cdo-admin-2026" : undefined;
+        const res = await issueRoleToken(targetRole, baseName, finalPassword);
+        setRole(targetRole);
+        setUsername(res.username);
+        setToken(res.access_token);
+        saveStoredSession({
+          token: res.access_token,
+          role: targetRole,
+          username: res.username,
+        });
+      } catch (err: any) {
+        if (err?.status === 401) {
+          setIsSwitchingRole(false);
+          throw err;
+        }
+        // Fallback if backend is warming up or offline
+        setRole(targetRole);
+        const fallbackName = `Демо (${ROLE_METADATA[targetRole].shortLabel})`;
+        setUsername(fallbackName);
+        saveStoredSession({
+          token: token || "offline-token",
+          role: targetRole,
+          username: fallbackName,
+        });
+      } finally {
+        setIsSwitchingRole(false);
+      }
+    },
+    [username, token]
+  );
 
   useEffect(() => {
     void refreshHealth();
-    void switchRole("employee");
     const timer = setInterval(() => {
       void refreshHealth();
     }, 15000);
     return () => clearInterval(timer);
-  }, [refreshHealth, switchRole]);
+  }, [refreshHealth]);
 
   return (
     <AuthContext.Provider
       value={{
+        isAuthenticated,
         role,
         username,
         token,
         health,
         isSwitchingRole,
+        login,
+        logout,
         switchRole,
         refreshHealth,
       }}

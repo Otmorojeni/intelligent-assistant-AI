@@ -7,6 +7,7 @@ import {
   FileSpreadsheet,
   FolderGit2,
   GitMerge,
+  LogOut,
   MessageSquare,
   MessageSquarePlus,
   PanelLeftClose,
@@ -74,8 +75,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
   collapsed,
   onToggleCollapse,
 }) => {
-  const { role, isSwitchingRole, switchRole } = useAuth();
+  const { role, username, isSwitchingRole, switchRole, logout } = useAuth();
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
+  const dropdownRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    const handleOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setRoleDropdownOpen(false);
+      }
+    };
+    if (roleDropdownOpen) {
+      document.addEventListener("mousedown", handleOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [roleDropdownOpen]);
 
   const currentRoleMeta = ROLE_METADATA[role];
   const historyList = sessions.filter((s) => s.turns.length > 0);
@@ -203,56 +217,83 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Bottom User Role Switcher Pill */}
-      <div className="p-4 border-t border-white/[0.1] relative">
-        {roleDropdownOpen && !collapsed && (
-          <div className="absolute bottom-20 left-4 right-4 rounded-2xl bg-[#111115] border border-white/[0.16] shadow-2xl p-2.5 z-50 space-y-1">
-            <div className="px-3 py-1.5 border-b border-white/[0.08] text-xs font-semibold text-zinc-300">
-              Смена пользователя
+      <div ref={dropdownRef} className="p-4 border-t border-white/[0.1] relative">
+        {roleDropdownOpen && (
+          <div
+            className={`absolute bottom-20 rounded-2xl bg-[#111115] border border-white/[0.18] shadow-2xl p-2.5 z-50 space-y-1.5 animate-in fade-in zoom-in-95 duration-150 ${
+              collapsed ? "left-2 w-72" : "left-4 right-4"
+            }`}
+          >
+            {/* User Info Header */}
+            <div className="px-3 py-2 border-b border-white/[0.08] space-y-1">
+              <div className="text-xs font-semibold text-white truncate">{username}</div>
+              <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                <span className="truncate">{currentRoleMeta.label}</span>
+              </div>
             </div>
-            {ROLE_ORDER.map((r) => {
-              const m = ROLE_METADATA[r];
-              const isSelected = r === role;
-              return (
-                <button
-                  key={r}
-                  onClick={() => {
-                    void switchRole(r);
-                    setRoleDropdownOpen(false);
-                  }}
-                  className={`w-full text-left p-2.5 rounded-xl transition flex items-center justify-between gap-2 ${
-                    isSelected
-                      ? "bg-white/[0.1] text-white"
-                      : "hover:bg-white/[0.05] text-zinc-200"
-                  }`}
-                >
-                  <div className="truncate">
-                    <div className="text-sm font-semibold text-white truncate">{m.shortLabel}</div>
-                    <div className="text-xs text-zinc-400 truncate">{m.clearance}</div>
-                  </div>
-                  {isSelected && <Check className="w-4 h-4 text-[#C50337] shrink-0" />}
-                </button>
-              );
-            })}
+
+            <div className="px-3 pt-1 text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
+              Переключение роли (RBAC)
+            </div>
+
+            <div className="space-y-0.5">
+              {ROLE_ORDER.map((r) => {
+                const m = ROLE_METADATA[r];
+                const isSelected = r === role;
+                return (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => {
+                      void switchRole(r, r === "admin" ? "cdo-admin-2026" : undefined);
+                      setRoleDropdownOpen(false);
+                    }}
+                    className={`w-full text-left p-2 rounded-xl transition flex items-center justify-between gap-2 ${
+                      isSelected
+                        ? "bg-white/[0.1] text-white"
+                        : "hover:bg-white/[0.05] text-zinc-300"
+                    }`}
+                  >
+                    <div className="truncate">
+                      <div className="text-xs font-semibold text-white truncate">{m.shortLabel}</div>
+                      <div className="text-[11px] text-zinc-400 truncate">{m.clearance}</div>
+                    </div>
+                    {isSelected && <Check className="w-4 h-4 text-[#C50337] shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="border-t border-white/[0.08] my-1" />
+
+            {/* Logout Option */}
+            <button
+              type="button"
+              onClick={() => {
+                setRoleDropdownOpen(false);
+                logout();
+              }}
+              className="w-full text-left px-3 py-2 rounded-xl transition flex items-center gap-2 text-rose-300 hover:bg-rose-500/15 hover:text-rose-200 text-xs font-medium"
+            >
+              <LogOut className="w-4 h-4 text-[#C50337] shrink-0" />
+              <span>Выйти из системы</span>
+            </button>
           </div>
         )}
 
         <button
+          type="button"
           disabled={isSwitchingRole}
-          onClick={() => {
-            if (collapsed) {
-              const nextIdx = (ROLE_ORDER.indexOf(role) + 1) % ROLE_ORDER.length;
-              void switchRole(ROLE_ORDER[nextIdx]);
-            } else {
-              setRoleDropdownOpen((o) => !o);
-            }
-          }}
+          onClick={() => setRoleDropdownOpen((o) => !o)}
+          title={`Пользователь: ${username} (${currentRoleMeta.shortLabel})`}
           className="w-full inline-flex items-center justify-between gap-3 px-4 py-3 rounded-full bg-[#111115] hover:bg-white/[0.07] border border-white/[0.16] text-base font-semibold text-white transition"
         >
           <div className="flex items-center gap-2.5 truncate">
             <Shield className="w-4 h-4 text-[#C50337] shrink-0" />
             {!collapsed && <span className="truncate">{currentRoleMeta.shortLabel}</span>}
           </div>
-          {!collapsed && <ChevronDown className="w-4 h-4 text-zinc-300 shrink-0" />}
+          {!collapsed && <ChevronDown className={`w-4 h-4 text-zinc-300 shrink-0 transition-transform ${roleDropdownOpen ? "rotate-180" : ""}`} />}
         </button>
       </div>
     </aside>

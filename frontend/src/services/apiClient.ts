@@ -57,10 +57,12 @@ export async function issueRoleToken(
   username = "Демо Пользователь",
   password?: string
 ): Promise<TokenResponse> {
+  const cleanUsername = username.trim() || "Демо Пользователь";
+  const finalUsername = cleanUsername.includes("(") ? cleanUsername : `${cleanUsername} (${role})`;
   const payload: TokenRequest = {
-    username: `${username} (${role})`,
+    username: finalUsername,
     role,
-    ...(role === "admin" ? { password: password || "cdo-admin-2026" } : {}),
+    ...(password !== undefined ? { password } : role === "admin" ? { password: "cdo-admin-2026" } : {}),
   };
   const res = await fetch(`${API_BASE}/v1/auth/token`, {
     method: "POST",

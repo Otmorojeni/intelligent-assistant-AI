@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { AuthProvider } from "./context/AuthContext";
+import { AuthProvider, useAuth } from "./context/AuthContext";
 import { Sidebar } from "./components/layout/Sidebar";
 import { AssistantScreen } from "./components/assistant/AssistantScreen";
 import { ConstructorScreen } from "./components/constructor/ConstructorScreen";
 import { ComplianceScreen } from "./components/compliance/ComplianceScreen";
 import { MatrixScreen } from "./components/matrix/MatrixScreen";
 import { GovernanceScreen } from "./components/governance/GovernanceScreen";
+import { AuthScreen } from "./components/auth/AuthScreen";
 import { ChatSessionRecord, ChatTurn, ScreenId } from "./types/api";
 
 const STORAGE_KEY = "cdo_assistant_chat_sessions_v1";
@@ -21,7 +22,8 @@ function loadSavedSessions(): ChatSessionRecord[] {
   }
 }
 
-export const App: React.FC = () => {
+const MainLayout: React.FC = () => {
+  const { isAuthenticated } = useAuth();
   const [activeScreen, setActiveScreen] = useState<ScreenId>("assistant");
   const [sessions, setSessions] = useState<ChatSessionRecord[]>(() => {
     const saved = loadSavedSessions();
@@ -139,45 +141,55 @@ export const App: React.FC = () => {
     setActiveScreen(screen);
   };
 
+  if (!isAuthenticated) {
+    return <AuthScreen />;
+  }
+
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
   return (
-    <AuthProvider>
-      <div className="flex h-screen w-screen overflow-hidden bg-[#08080A] text-zinc-100">
-        <Sidebar
-          activeScreen={activeScreen}
-          onSelectScreen={(s) => setActiveScreen(s)}
-          onNewChat={handleNewChat}
-          sessions={sessions}
-          activeSessionId={activeSessionId}
-          onSelectSession={(id) => setActiveSessionId(id)}
-          onDeleteSession={handleDeleteSession}
-          collapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
-        />
+    <div className="flex h-screen w-screen overflow-hidden bg-[#08080A] text-zinc-100">
+      <Sidebar
+        activeScreen={activeScreen}
+        onSelectScreen={(s) => setActiveScreen(s)}
+        onNewChat={handleNewChat}
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        onSelectSession={(id) => setActiveSessionId(id)}
+        onDeleteSession={handleDeleteSession}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
+      />
 
-        <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
-          {activeScreen === "assistant" && (
-            <AssistantScreen
-              sessionId={activeSessionId}
-              turns={activeSession?.turns || []}
-              onUpdateTurns={handleUpdateTurns}
-              onResetSession={handleNewChat}
-              onNavigateScreen={handleNavigateScreen}
-            />
-          )}
+      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+        {activeScreen === "assistant" && (
+          <AssistantScreen
+            sessionId={activeSessionId}
+            turns={activeSession?.turns || []}
+            onUpdateTurns={handleUpdateTurns}
+            onResetSession={handleNewChat}
+            onNavigateScreen={handleNavigateScreen}
+          />
+        )}
 
-          {activeScreen === "constructor" && (
-            <ConstructorScreen initialModuleCode={selectedTemplateCode} />
-          )}
+        {activeScreen === "constructor" && (
+          <ConstructorScreen initialModuleCode={selectedTemplateCode} />
+        )}
 
-          {activeScreen === "compliance" && <ComplianceScreen />}
+        {activeScreen === "compliance" && <ComplianceScreen />}
 
-          {activeScreen === "matrix" && <MatrixScreen />}
+        {activeScreen === "matrix" && <MatrixScreen />}
 
-          {activeScreen === "governance" && <GovernanceScreen />}
-        </div>
+        {activeScreen === "governance" && <GovernanceScreen />}
       </div>
+    </div>
+  );
+};
+
+export const App: React.FC = () => {
+  return (
+    <AuthProvider>
+      <MainLayout />
     </AuthProvider>
   );
 };

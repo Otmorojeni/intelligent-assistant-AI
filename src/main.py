@@ -42,6 +42,17 @@ if settings.STATIC_DIR.exists():
         app.mount("/assets", StaticFiles(directory=str(settings.STATIC_DIR / "assets")), name="ui_assets")
     app.mount("/ui", StaticFiles(directory=str(settings.STATIC_DIR), html=True), name="ui_static")
 
+    # Serve root static assets (favicon, logos, icons) directly from ui/
+    for asset_name in ("favicon.png", "favicon.svg", "favicon.ico", "docorp-logo.png"):
+        asset_file = settings.STATIC_DIR / asset_name
+        if asset_file.exists():
+            def _create_asset_handler(path=str(asset_file)):
+                async def _handler():
+                    return FileResponse(path)
+                return _handler
+            app.add_api_route(f"/{asset_name}", _create_asset_handler(), methods=["GET"], include_in_schema=False)
+
+
 
 @app.get("/app", include_in_schema=False)
 async def serve_spa_app():

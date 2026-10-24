@@ -97,41 +97,48 @@ def parse_uploaded_document(
                         if current_lines:
                             chunks.append(
                                 ExtractedChunk(
-                                    chapter=current_chapter,
-                                    clause=current_clause,
+                                    chapter=current_chapter[:250],
+                                    clause=current_clause[:120],
                                     page_number=current_page,
                                     content="\n".join(current_lines),
                                     metadata={"doc_code": doc_code, "version": version, "clause": current_clause},
                                 )
                             )
                             current_lines = []
-                        current_clause = m_cl.group(1)
+                        current_clause = m_cl.group(1)[:120]
                         current_page = page_num
                         current_lines.append(line)
                     elif m_chap:
-                        if current_lines:
-                            chunks.append(
-                                ExtractedChunk(
-                                    chapter=current_chapter,
-                                    clause=current_clause,
-                                    page_number=current_page,
-                                    content="\n".join(current_lines),
-                                    metadata={"doc_code": doc_code, "version": version, "clause": current_clause},
+                        is_heading = (
+                            line.lower().startswith(("глава", "раздел", "статья"))
+                            or (len(line) <= 120 and not line.endswith((";", ",", "...")))
+                        )
+                        if is_heading:
+                            if current_lines:
+                                chunks.append(
+                                    ExtractedChunk(
+                                        chapter=current_chapter[:250],
+                                        clause=current_clause[:120],
+                                        page_number=current_page,
+                                        content="\n".join(current_lines),
+                                        metadata={"doc_code": doc_code, "version": version, "clause": current_clause},
+                                    )
                                 )
-                            )
-                            current_lines = []
-                        current_chapter = line
-                        ch_num = m_chap.group(1) if m_chap.group(1) else "1"
-                        current_clause = f"{ch_num}.0"
-                        current_page = page_num
+                                current_lines = []
+                            current_chapter = line[:250].strip()
+                            ch_num = m_chap.group(1) if m_chap.group(1) else "1"
+                            current_clause = f"{ch_num}.0"
+                            current_page = page_num
+                        else:
+                            current_lines.append(line)
                     else:
                         current_lines.append(line)
 
             if current_lines:
                 chunks.append(
                     ExtractedChunk(
-                        chapter=current_chapter,
-                        clause=current_clause,
+                        chapter=current_chapter[:250],
+                        clause=current_clause[:120],
                         page_number=current_page,
                         content="\n".join(current_lines),
                         metadata={"doc_code": doc_code, "version": version, "clause": current_clause},
@@ -175,31 +182,38 @@ def parse_uploaded_document(
                 if current_lines:
                     chunks.append(
                         ExtractedChunk(
-                            chapter=current_chapter,
-                            clause=current_clause,
+                            chapter=current_chapter[:250],
+                            clause=current_clause[:120],
                             page_number=1,
                             content="\n".join(current_lines),
                             metadata={"doc_code": doc_code, "version": version, "clause": current_clause},
                         )
                     )
                     current_lines = []
-                current_clause = m_cl.group(1)
+                current_clause = m_cl.group(1)[:120]
                 current_lines.append(text)
             elif m_chap and not m_cl:
-                if current_lines:
-                    chunks.append(
-                        ExtractedChunk(
-                            chapter=current_chapter,
-                            clause=current_clause,
-                            page_number=1,
-                            content="\n".join(current_lines),
-                            metadata={"doc_code": doc_code, "version": version, "clause": current_clause},
+                is_heading = (
+                    text.lower().startswith(("глава", "раздел", "статья"))
+                    or (len(text) <= 120 and not text.endswith((";", ",", "...")))
+                )
+                if is_heading:
+                    if current_lines:
+                        chunks.append(
+                            ExtractedChunk(
+                                chapter=current_chapter[:250],
+                                clause=current_clause[:120],
+                                page_number=1,
+                                content="\n".join(current_lines),
+                                metadata={"doc_code": doc_code, "version": version, "clause": current_clause},
+                            )
                         )
-                    )
-                    current_lines = []
-                current_chapter = text
-                ch_num = m_chap.group(1) if m_chap.group(1) else "1"
-                current_clause = f"{ch_num}.0"
+                        current_lines = []
+                    current_chapter = text[:250].strip()
+                    ch_num = m_chap.group(1) if m_chap.group(1) else "1"
+                    current_clause = f"{ch_num}.0"
+                else:
+                    current_lines.append(text)
             else:
                 current_lines.append(text)
 
@@ -217,8 +231,8 @@ def parse_uploaded_document(
         if current_lines:
             chunks.append(
                 ExtractedChunk(
-                    chapter=current_chapter,
-                    clause=current_clause,
+                    chapter=current_chapter[:250],
+                    clause=current_clause[:120],
                     page_number=1,
                     content="\n".join(current_lines),
                     metadata={"doc_code": doc_code, "version": version, "clause": current_clause},

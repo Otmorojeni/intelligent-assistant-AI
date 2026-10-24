@@ -39,6 +39,7 @@ from pathlib import Path
 import sys
 import unittest
 import uuid
+from typing import Any, Dict, List, Optional
 
 import docx
 from docx.enum.text import WD_ALIGN_PARAGRAPH

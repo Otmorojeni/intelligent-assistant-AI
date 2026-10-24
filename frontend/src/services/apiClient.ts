@@ -34,11 +34,31 @@ async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let errorMessage = `HTTP ${res.status}`;
     try {
-      const data = await res.json();
-      errorMessage = data.detail || JSON.stringify(data);
-    } catch {
       const txt = await res.text();
-      if (txt) errorMessage = txt;
+      if (txt) {
+        try {
+          const data = JSON.parse(txt);
+          if (data && typeof data === "object") {
+            if (typeof data.detail === "string") {
+              errorMessage = data.detail;
+            } else if (Array.isArray(data.detail)) {
+              errorMessage = data.detail.map((d: any) => d.msg || JSON.stringify(d)).join(", ");
+            } else if (data.detail) {
+              errorMessage = JSON.stringify(data.detail);
+            } else if (data.message) {
+              errorMessage = String(data.message);
+            } else {
+              errorMessage = JSON.stringify(data);
+            }
+          } else {
+            errorMessage = txt;
+          }
+        } catch {
+          errorMessage = txt.length > 300 ? `${txt.slice(0, 300)}...` : txt;
+        }
+      }
+    } catch {
+      // ignore
     }
     const err = new Error(errorMessage) as Error & { status?: number };
     err.status = res.status;
@@ -58,9 +78,8 @@ export async function issueRoleToken(
   password?: string
 ): Promise<TokenResponse> {
   const cleanUsername = username.trim() || "Демо Пользователь";
-  const finalUsername = cleanUsername.includes("(") ? cleanUsername : `${cleanUsername} (${role})`;
   const payload: TokenRequest = {
-    username: finalUsername,
+    username: cleanUsername,
     role,
     ...(password !== undefined ? { password } : role === "admin" ? { password: "cdo-admin-2026" } : {}),
   };

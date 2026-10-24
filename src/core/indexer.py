@@ -58,15 +58,15 @@ async def save_extracted_document(
     """Persist an ExtractedDocument and all its DocumentChunk instances."""
     db_doc = KnowledgeDocument(
         id=uuid.uuid4(),
-        doc_code=doc.doc_code,
-        title=doc.title,
-        doc_type=doc.doc_type,
-        version=doc.version,
-        access_level=doc.access_level,
+        doc_code=(doc.doc_code or "")[:64],
+        title=(doc.title or "")[:512],
+        doc_type=(doc.doc_type or "")[:64],
+        version=(doc.version or "")[:32],
+        access_level=(doc.access_level or "public")[:32],
         is_active=True,
-        file_name=doc.file_name,
-        file_size=doc.file_size,
-        sha256=doc.sha256,
+        file_name=(doc.file_name or "")[:256],
+        file_size=doc.file_size or 0,
+        sha256=doc.sha256[:64] if doc.sha256 else None,
     )
     session.add(db_doc)
     await session.flush()
@@ -75,11 +75,11 @@ async def save_extracted_document(
         db_chunk = DocumentChunk(
             id=uuid.uuid4(),
             document_id=db_doc.id,
-            chapter=chunk.chapter,
-            clause=chunk.clause,
-            page_number=chunk.page_number,
-            content=chunk.content,
-            metadata_json=chunk.metadata,
+            chapter=(chunk.chapter or "Общие положения")[:250],
+            clause=(chunk.clause or "1.0")[:120],
+            page_number=chunk.page_number or 1,
+            content=chunk.content or "",
+            metadata_json=chunk.metadata or {},
         )
         session.add(db_chunk)
 

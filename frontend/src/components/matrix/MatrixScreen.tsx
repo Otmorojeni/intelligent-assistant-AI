@@ -401,7 +401,11 @@ export const MatrixScreen: React.FC = () => {
         </div>
 
         {/* Route Calculator Card */}
-        <div className="zyricon-glass-card rounded-3xl p-6 sm:p-7 space-y-6 border border-white/[0.14] shadow-2xl backdrop-blur-2xl">
+        <div
+          className={`zyricon-glass-card rounded-3xl p-6 sm:p-7 space-y-6 border border-white/[0.14] shadow-2xl backdrop-blur-2xl relative ${
+            isRuleDropdownOpen ? "z-30" : "z-10"
+          }`}
+        >
           <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
             <div className="flex items-center gap-2.5">
               <div className="p-2 rounded-xl bg-[#C50337]/15 border border-[#C50337]/30 text-[#C50337]">
@@ -427,7 +431,7 @@ export const MatrixScreen: React.FC = () => {
           </div>
 
           {/* Document Rule Selection — Constrained & Responsive */}
-          <div className="space-y-2 relative" ref={ruleDropdownRef}>
+          <div className="space-y-2 relative z-30" ref={ruleDropdownRef}>
             <div className="flex items-center justify-between text-xs font-semibold text-zinc-300 uppercase tracking-wider">
               <span>1. Вид документа (Правила согласования № 1–13)</span>
               <span className="text-[11px] text-zinc-400 font-normal lowercase tracking-normal">
@@ -473,7 +477,7 @@ export const MatrixScreen: React.FC = () => {
             {isRuleDropdownOpen && (
               <div className="absolute left-0 right-0 top-full mt-2 z-50 rounded-2xl bg-[#111116] border border-white/[0.18] shadow-[0_20px_50px_rgba(0,0,0,0.85)] backdrop-blur-2xl overflow-hidden flex flex-col max-h-[460px] w-full max-w-full animate-in fade-in zoom-in-95 duration-150">
                 {/* Search Header inside Dropdown */}
-                <div className="p-3 border-b border-white/[0.08] bg-[#15151B] sticky top-0 z-10 space-y-2.5">
+                <div className="p-3 border-b border-white/[0.08] bg-[#15151B] sticky top-0 z-10 space-y-2.5 shrink-0">
                   <div className="relative">
                     <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
@@ -526,7 +530,7 @@ export const MatrixScreen: React.FC = () => {
                 </div>
 
                 {/* Scrollable Rules List with Word-Wrap & No Horizontal Spill */}
-                <div className="overflow-y-auto divide-y divide-white/[0.05] p-1.5 space-y-0.5">
+                <div className="overflow-y-auto flex-1 min-h-0 divide-y divide-white/[0.05] p-1.5 space-y-0.5">
                   {filteredRules.length === 0 ? (
                     <div className="p-6 text-center text-xs text-zinc-400 space-y-1">
                       <p className="font-semibold text-zinc-300">Правила не найдены</p>
@@ -736,7 +740,7 @@ export const MatrixScreen: React.FC = () => {
         </div>
 
         {/* All 13 Rules Table */}
-        <div className="zyricon-glass-card rounded-3xl p-6 sm:p-7 space-y-4 border border-white/[0.14] shadow-2xl backdrop-blur-2xl">
+        <div className="zyricon-glass-card rounded-3xl p-6 sm:p-7 space-y-4 border border-white/[0.14] shadow-2xl backdrop-blur-2xl relative z-0">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-base font-semibold text-white">

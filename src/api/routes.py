@@ -833,7 +833,7 @@ async def generate_token(
         if request.password is not None and request.password != "demo":
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Неверный логин или пароль. Тестовый доступ: demo / demo",
+                detail="Неверный логин или пароль",
             )
         token = create_access_token({"sub": "demo", "role": norm_role})
         return TokenResponse(
@@ -848,7 +848,7 @@ async def generate_token(
         if not request.password or request.password not in (settings.ADMIN_DEMO_PASSWORD, "demo"):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Admin token issuance requires valid administrator password.",
+                detail="Неверный логин или пароль",
             )
         norm_role = UserRole.ADMIN.value
 
@@ -856,7 +856,7 @@ async def generate_token(
     elif request.password is not None and request.password not in ("demo", settings.ADMIN_DEMO_PASSWORD):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный логин или пароль. Тестовый доступ: demo / demo",
+            detail="Неверный логин или пароль",
         )
 
     token = create_access_token({"sub": clean_user, "role": norm_role})

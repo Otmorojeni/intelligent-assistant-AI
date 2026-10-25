@@ -152,7 +152,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
       } catch (err: any) {
         if (err?.status === 401) {
-          throw new Error(err?.message || "Неверный логин или пароль. Тестовый доступ: demo / demo");
+          throw new Error(err?.message || "Неверный логин или пароль");
         }
         // Graceful offline demo fallback if backend is unreachable
         if (err?.name === "TypeError" || !err?.status) {

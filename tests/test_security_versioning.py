@@ -488,6 +488,24 @@ class TestSecurityVersioning(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(resp_ver.status_code, 200)
             self.assertIsInstance(resp_ver.json(), list)
 
+            # 3. Test demo / demo credentials
+            resp_demo = await client.post(
+                "/v1/auth/token",
+                json={"username": "demo", "password": "demo", "role": "employee"},
+            )
+            self.assertEqual(resp_demo.status_code, 200)
+            demo_data = resp_demo.json()
+            self.assertEqual(demo_data["username"], "demo")
+            self.assertEqual(demo_data["role"], "employee")
+            self.assertTrue(len(demo_data["access_token"]) > 20)
+
+            # 4. Test demo with wrong password fails with 401
+            resp_bad = await client.post(
+                "/v1/auth/token",
+                json={"username": "demo", "password": "incorrect_password", "role": "employee"},
+            )
+            self.assertEqual(resp_bad.status_code, 401)
+
     async def test_security_auditor_can_see_confidential_chunks(self):
         """Verify that security_auditor can see 'confidential' classified chunks, while employee and dou cannot."""
         doc_conf = docx.Document()

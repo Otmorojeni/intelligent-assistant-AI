@@ -64,7 +64,15 @@ async function handleResponse<T>(res: Response): Promise<T> {
     err.status = res.status;
     throw err;
   }
-  return res.json();
+  const txt = await res.text();
+  if (!txt) {
+    return {} as T;
+  }
+  try {
+    return JSON.parse(txt) as T;
+  } catch {
+    return txt as unknown as T;
+  }
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {

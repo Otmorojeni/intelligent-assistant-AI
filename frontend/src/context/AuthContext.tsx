@@ -53,7 +53,7 @@ interface AuthContextValue {
   token: string | null;
   health: HealthResponse | null;
   isSwitchingRole: boolean;
-  login: (credentials: { role: UserRole; username: string; password?: string }) => Promise<void>;
+  login: (credentials: { role?: UserRole; username: string; password?: string }) => Promise<void>;
   logout: () => void;
   switchRole: (targetRole: UserRole, password?: string) => Promise<void>;
   refreshHealth: () => Promise<void>;
@@ -134,36 +134,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = useCallback(
-    async (credentials: { role: UserRole; username: string; password?: string }) => {
+    async (credentials: { role?: UserRole; username: string; password?: string }) => {
       setIsSwitchingRole(true);
       try {
-        const cleanUser = credentials.username.trim() || ROLE_METADATA[credentials.role].label;
-        const res = await issueRoleToken(credentials.role, cleanUser, credentials.password);
-        setRole(credentials.role);
+        const cleanUser = credentials.username.trim() || "demo";
+        const targetRole: UserRole = credentials.role || (cleanUser.toLowerCase() === "admin" ? "admin" : "employee");
+        const res = await issueRoleToken(targetRole, cleanUser, credentials.password);
+        const resolvedRole = (res.role as UserRole) || targetRole;
+        setRole(resolvedRole);
         setUsername(res.username);
         setToken(res.access_token);
         setIsAuthenticated(true);
         saveStoredSession({
           token: res.access_token,
-          role: credentials.role,
+          role: resolvedRole,
           username: res.username,
         });
       } catch (err: any) {
         if (err?.status === 401) {
-          throw new Error("Неверный пароль администратора. Для демо-доступа используйте: cdo-admin-2026");
+          throw new Error(err?.message || "Неверный логин или пароль. Тестовый доступ: demo / demo");
         }
         // Graceful offline demo fallback if backend is unreachable
         if (err?.name === "TypeError" || !err?.status) {
-          const fallbackUser = `${credentials.username.trim() || ROLE_METADATA[credentials.role].shortLabel} (Офлайн-демо)`;
+          const cleanUser = credentials.username.trim() || "demo";
+          const fallbackRole: UserRole = credentials.role || (cleanUser.toLowerCase() === "admin" ? "admin" : "employee");
           const dummyToken = "offline-demo-token";
-          setRole(credentials.role);
-          setUsername(fallbackUser);
+          setRole(fallbackRole);
+          setUsername(cleanUser);
           setToken(dummyToken);
           setIsAuthenticated(true);
           saveStoredSession({
             token: dummyToken,
-            role: credentials.role,
-            username: fallbackUser,
+            role: fallbackRole,
+            username: cleanUser,
           });
           return;
         }

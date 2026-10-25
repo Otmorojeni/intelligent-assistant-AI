@@ -823,19 +823,47 @@ async def get_audit_trail(
 async def generate_token(
     request: TokenRequest,
 ) -> TokenResponse:
-    """Generate signed JWT token containing subject and RBAC role (requires password for admin)."""
+    """Generate signed JWT token containing subject and RBAC role (supports demo/demo)."""
     norm_role = normalize_role(request.role)
-    if norm_role == UserRole.ADMIN.value:
-        if not request.password or request.password != settings.ADMIN_DEMO_PASSWORD:
+    clean_user = request.username.strip()
+    user_lower = clean_user.lower()
+
+    # Validate demo / demo test credentials
+    if user_lower == "demo":
+        if request.password is not None and request.password != "demo":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Неверный логин или пароль. Тестовый доступ: demo / demo",
+            )
+        token = create_access_token({"sub": "demo", "role": norm_role})
+        return TokenResponse(
+            access_token=token,
+            token_type="bearer",
+            role=norm_role,
+            username="demo",
+        )
+
+    # Validate admin credentials
+    if norm_role == UserRole.ADMIN.value or user_lower == "admin":
+        if not request.password or request.password not in (settings.ADMIN_DEMO_PASSWORD, "demo"):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Admin token issuance requires valid administrator password.",
             )
-    token = create_access_token({"sub": request.username, "role": norm_role})
+        norm_role = UserRole.ADMIN.value
+
+    # General password check if password was submitted
+    elif request.password is not None and request.password not in ("demo", settings.ADMIN_DEMO_PASSWORD):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Неверный логин или пароль. Тестовый доступ: demo / demo",
+        )
+
+    token = create_access_token({"sub": clean_user, "role": norm_role})
     return TokenResponse(
         access_token=token,
         token_type="bearer",
         role=norm_role,
-        username=request.username,
+        username=clean_user,
     )
 

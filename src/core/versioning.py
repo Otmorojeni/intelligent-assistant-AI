@@ -90,7 +90,11 @@ def parse_uploaded_document(
                 lines = [l for l in lines if l]
 
                 for line in lines:
-                    m_chap = re.match(r"^(?:Глава|Раздел|Статья|[1-9]\d*\.)\s*(\d+)?\.?\s*(.*)", line, re.I)
+                    m_chap = re.match(
+                        r"^(?:(?:Глава|Раздел|Статья|Часть|Приложение)\s*(\d+|[IVXLCDM]+)?\.?|([1-9]\d*)\.)\s*(.*)",
+                        line,
+                        re.I,
+                    )
                     m_cl = re.match(r"^(?:(?:п\.|пп\.|пункт)\s*)?(\d+\.\d+(?:\.\d+)*)\.?\s*(.*)", line, re.I)
 
                     if m_cl:
@@ -110,7 +114,7 @@ def parse_uploaded_document(
                         current_lines.append(line)
                     elif m_chap:
                         is_heading = (
-                            line.lower().startswith(("глава", "раздел", "статья"))
+                            line.lower().startswith(("глава", "раздел", "статья", "часть", "приложение"))
                             or (len(line) <= 120 and not line.endswith((";", ",", "...")))
                         )
                         if is_heading:
@@ -126,7 +130,7 @@ def parse_uploaded_document(
                                 )
                                 current_lines = []
                             current_chapter = line[:250].strip()
-                            ch_num = m_chap.group(1) if m_chap.group(1) else "1"
+                            ch_num = m_chap.group(1) or m_chap.group(2) or "1"
                             current_clause = f"{ch_num}.0"
                             current_page = page_num
                         else:
@@ -175,7 +179,11 @@ def parse_uploaded_document(
             if not text:
                 continue
 
-            m_chap = re.match(r"^(?:Глава|Раздел|Статья|[1-9]\d*\.)\s*(\d+)?\.?\s*(.*)", text, re.I)
+            m_chap = re.match(
+                r"^(?:(?:Глава|Раздел|Статья|Часть|Приложение)\s*(\d+|[IVXLCDM]+)?\.?|([1-9]\d*)\.)\s*(.*)",
+                text,
+                re.I,
+            )
             m_cl = re.match(r"^(?:(?:п\.|пп\.|пункт)\s*)?(\d+\.\d+(?:\.\d+)*)\.?\s*(.*)", text, re.I)
 
             if m_cl:
@@ -194,7 +202,7 @@ def parse_uploaded_document(
                 current_lines.append(text)
             elif m_chap and not m_cl:
                 is_heading = (
-                    text.lower().startswith(("глава", "раздел", "статья"))
+                    text.lower().startswith(("глава", "раздел", "статья", "часть", "приложение"))
                     or (len(text) <= 120 and not text.endswith((";", ",", "...")))
                 )
                 if is_heading:
@@ -210,7 +218,7 @@ def parse_uploaded_document(
                         )
                         current_lines = []
                     current_chapter = text[:250].strip()
-                    ch_num = m_chap.group(1) if m_chap.group(1) else "1"
+                    ch_num = m_chap.group(1) or m_chap.group(2) or "1"
                     current_clause = f"{ch_num}.0"
                 else:
                     current_lines.append(text)

@@ -6,7 +6,6 @@ import { ConstructorScreen } from "./components/constructor/ConstructorScreen";
 import { ComplianceScreen } from "./components/compliance/ComplianceScreen";
 import { MatrixScreen } from "./components/matrix/MatrixScreen";
 import { GovernanceScreen } from "./components/governance/GovernanceScreen";
-import { AuthScreen } from "./components/auth/AuthScreen";
 import { ChatSessionRecord, ChatTurn, ScreenId } from "./types/api";
 
 const STORAGE_KEY = "cdo_assistant_chat_sessions_v1";
@@ -23,8 +22,7 @@ function loadSavedSessions(): ChatSessionRecord[] {
 }
 
 const MainLayout: React.FC = () => {
-  const { isAuthenticated } = useAuth();
-  const [activeScreen, setActiveScreen] = useState<ScreenId>("assistant");
+    const [activeScreen, setActiveScreen] = useState<ScreenId>("assistant");
   const [sessions, setSessions] = useState<ChatSessionRecord[]>(() => {
     const saved = loadSavedSessions();
     if (saved.length > 0) return saved;
@@ -141,10 +139,7 @@ const MainLayout: React.FC = () => {
     setActiveScreen(screen);
   };
 
-  if (!isAuthenticated) {
-    return <AuthScreen />;
-  }
-
+  
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
   return (

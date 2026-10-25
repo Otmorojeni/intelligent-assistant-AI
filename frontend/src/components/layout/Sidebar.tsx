@@ -75,7 +75,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   collapsed,
   onToggleCollapse,
 }) => {
-  const { role, username, isSwitchingRole, switchRole, logout } = useAuth();
+  const { role, username, isSwitchingRole, switchRole } = useAuth();
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
   const dropdownRef = React.useRef<HTMLDivElement>(null);
 
@@ -234,7 +234,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
 
             <div className="px-3 pt-1 text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
-              Переключение роли (RBAC)
+              Выбор роли доступа
             </div>
 
             <div className="space-y-0.5">
@@ -265,20 +265,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               })}
             </div>
 
-            <div className="border-t border-white/[0.08] my-1" />
-
-            {/* Logout Option */}
-            <button
-              type="button"
-              onClick={() => {
-                setRoleDropdownOpen(false);
-                logout();
-              }}
-              className="w-full text-left px-3 py-2 rounded-xl transition flex items-center gap-2 text-rose-300 hover:bg-rose-500/15 hover:text-rose-200 text-xs font-medium"
-            >
-              <LogOut className="w-4 h-4 text-[#C50337] shrink-0" />
-              <span>Выйти из системы</span>
-            </button>
+            
           </div>
         )}
 

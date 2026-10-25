@@ -111,7 +111,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const initialSession = loadStoredSession();
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !!initialSession);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
   const [role, setRole] = useState<UserRole>(() => initialSession?.role || "employee");
   const [username, setUsername] = useState<string>(() => initialSession?.username || "Сотрудник ЦДО");
   const [token, setToken] = useState<string | null>(() => initialSession?.token || null);
@@ -230,6 +230,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 
   useEffect(() => {
+    if (!token) {
+      void switchRole(role);
+    }
     void refreshHealth();
     const timer = setInterval(() => {
       void refreshHealth();

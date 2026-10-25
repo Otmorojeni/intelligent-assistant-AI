@@ -29,12 +29,6 @@ export const AuthScreen: React.FC = () => {
     }
   };
 
-  const handleFillDemo = () => {
-    setUsername("demo");
-    setPassword("demo");
-    setErrorMessage(null);
-  };
-
   return (
     <div className="min-h-screen w-screen flex items-center justify-center p-4 bg-[#08080A] text-zinc-100 relative overflow-hidden select-none">
       {/* Subtle radial crimson glow in background */}
@@ -74,7 +68,7 @@ export const AuthScreen: React.FC = () => {
                 required
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="demo"
+                placeholder="Введите логин"
                 autoComplete="username"
                 autoFocus
                 className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-[#0D0D11] border border-white/[0.14] text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-[#C50337] focus:ring-1 focus:ring-[#C50337] transition"
@@ -91,7 +85,7 @@ export const AuthScreen: React.FC = () => {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="demo"
+                placeholder="Введите пароль"
                 autoComplete="current-password"
                 className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-[#0D0D11] border border-white/[0.14] text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-[#C50337] focus:ring-1 focus:ring-[#C50337] transition"
               />
@@ -104,18 +98,6 @@ export const AuthScreen: React.FC = () => {
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
-          </div>
-
-          {/* Test credentials banner */}
-          <div
-            onClick={handleFillDemo}
-            title="Нажмите для заполнения demo / demo"
-            className="p-2.5 rounded-xl bg-white/[0.04] border border-white/[0.08] text-xs text-zinc-400 flex items-center justify-between cursor-pointer hover:bg-white/[0.08] hover:border-white/[0.16] transition"
-          >
-            <span>Тестовые данные:</span>
-            <span className="font-mono text-zinc-200 font-semibold bg-white/[0.08] px-2 py-0.5 rounded-md text-[11px]">
-              demo / demo
-            </span>
           </div>
 
           {/* Submit button */}

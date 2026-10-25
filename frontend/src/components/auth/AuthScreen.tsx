@@ -50,7 +50,12 @@ export const AuthScreen: React.FC = () => {
 
   const handleSelectRole = (r: UserRole) => {
     setSelectedRole(r);
-    setUsernameInput(ROLE_PRESETS[r].name);
+    const isPresetName =
+      Object.values(ROLE_PRESETS).some((p) => p.name === usernameInput) ||
+      !usernameInput.trim();
+    if (isPresetName) {
+      setUsernameInput(ROLE_PRESETS[r].name);
+    }
     setErrorMessage(null);
     if (r === "admin" && !passwordInput) {
       setPasswordInput("cdo-admin-2026");

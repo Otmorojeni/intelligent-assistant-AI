@@ -228,7 +228,7 @@ export interface ApprovalRuleItem {
   requires_regional: string;
   condition_description?: string | null;
   signatory: string;
-  extra_info: Record<string, any>;
+  extra_info?: Record<string, any>;
 }
 
 export interface DocumentVersionItem {

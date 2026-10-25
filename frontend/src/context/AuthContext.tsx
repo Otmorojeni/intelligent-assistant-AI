@@ -188,8 +188,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsSwitchingRole(true);
       try {
         const roleMeta = ROLE_METADATA[targetRole];
-        const baseName = username.replace(/\s*\([^)]*\)$/, "").trim() || roleMeta.shortLabel;
-        const finalPassword = password !== undefined ? password : targetRole === "admin" ? "cdo-admin-2026" : undefined;
+        const baseName = username.trim() || roleMeta.shortLabel;
+        const finalPassword =
+          password !== undefined
+            ? password
+            : targetRole === "admin"
+            ? "cdo-admin-2026"
+            : undefined;
         const res = await issueRoleToken(targetRole, baseName, finalPassword);
         setRole(targetRole);
         setUsername(res.username);
@@ -202,7 +207,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch (err: any) {
         if (err?.status === 401) {
           setIsSwitchingRole(false);
-          throw err;
+          alert("Для переключения на роль Администратора требуется пароль (cdo-admin-2026)");
+          return;
         }
         // Fallback if backend is warming up or offline
         setRole(targetRole);
